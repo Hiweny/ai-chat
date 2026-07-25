@@ -1277,6 +1277,7 @@ ${conversationText}
         settings.colorScheme = $('#set-theme').value;
         settings.bubbleStyle = $('#set-bubble').value;
         settings.showTimestamp = $('#set-timestamp').checked;
+        settings.backgroundImage = $('#set-bgurl').value.trim();
         settings.backgroundBlur = parseFloat($('#set-blur').value) || 0;
         settings.backgroundOpacity = parseFloat($('#set-opacity').value) || 0.85;
         settings.maxPromptLength = parseInt($('#set-maxlen').value) || 3000;
@@ -1526,6 +1527,58 @@ ${conversationText}
             applyBackground();
             saveAll();
         });
+
+        // 头像上传
+        function setupAvatarUpload(inputId, profileKey, urlInputId) {
+            const input = $(inputId);
+            if (!input) return;
+            input.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                if (file.size > 2 * 1024 * 1024) {
+                    showToast('图片较大(>2MB)，建议使用URL', 'warning');
+                    return;
+                }
+                const reader = new FileReader();
+                reader.onload = (ev) => {
+                    const dataUrl = ev.target.result;
+                    if (profileKey === 'user') {
+                        userProfile.avatar = dataUrl;
+                        $(urlInputId).value = dataUrl;
+                    } else {
+                        aiProfile.avatar = dataUrl;
+                        $(urlInputId).value = dataUrl;
+                    }
+                    saveAll();
+                    rebuildMessagesUI();
+                    showToast('头像已更新', 'success', 1500);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        setupAvatarUpload('#set-userimage', 'user', '#set-useravatar');
+        setupAvatarUpload('#set-aiimage', 'ai', '#set-aiavatar');
+
+        // 头像清除
+        function setupAvatarClear(btnId, profileKey, urlInputId) {
+            const btn = $(btnId);
+            if (!btn) return;
+            btn.addEventListener('click', () => {
+                if (profileKey === 'user') {
+                    userProfile.avatar = '';
+                } else {
+                    aiProfile.avatar = '';
+                }
+                $(urlInputId).value = '';
+                saveAll();
+                rebuildMessagesUI();
+                showToast('头像已清除', 'info', 1500);
+            });
+        }
+
+        setupAvatarClear('#clear-useravatar', 'user', '#set-useravatar');
+        setupAvatarClear('#clear-aiavatar', 'ai', '#set-aiavatar');
 
         // 数据操作
         $('#export-btn').addEventListener('click', exportConversation);
