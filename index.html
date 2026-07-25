@@ -5,83 +5,161 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>AI Chat - 智能对话</title>
     <meta name="description" content="优雅的AI智能对话体验">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#10022;</text></svg>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
 </head>
 <body>
+    <!-- 背景装饰 -->
     <div id="bg-layer"></div>
     <div id="bg-mask"></div>
     <div id="grain-overlay"></div>
+
+    <!-- 网络状态提示 -->
+    <div id="network-status" class="network-status">
+        <span class="network-icon">&#9888;</span>
+        <span class="network-text">网络连接已断开</span>
+    </div>
+
+    <!-- 主容器 -->
     <div id="app">
-        <aside id="sidebar">
+        <!-- 侧边栏 -->
+        <aside id="sidebar" role="navigation" aria-label="对话列表">
             <div class="sidebar-header">
                 <div class="logo">
-                    <span class="logo-icon">✦</span>
+                    <span class="logo-icon">&#10022;</span>
                     <span class="logo-text">AI Chat</span>
                 </div>
-                <button id="new-chat-btn" class="btn-icon" title="新建对话">
+                <button id="new-chat-btn" class="btn-icon" title="新建对话 (Ctrl+N)" aria-label="新建对话">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 </button>
             </div>
-            <div id="chat-list" class="chat-list"></div>
+
+            <!-- 搜索框 -->
+            <div class="sidebar-search">
+                <div class="search-wrapper">
+                    <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="chat-search" placeholder="搜索对话..." aria-label="搜索对话">
+                </div>
+            </div>
+
+            <div id="chat-list" class="chat-list" role="list"></div>
+
+            <!-- 对话统计 -->
+            <div class="sidebar-stats">
+                <span id="stats-conv-count">0 个对话</span>
+                <span class="stats-divider">|</span>
+                <span id="stats-msg-count">0 条消息</span>
+            </div>
+
             <div class="sidebar-footer">
-                <button id="sidebar-settings-btn" class="btn-icon" title="设置">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                <button id="sidebar-settings-btn" class="btn-icon" title="设置" aria-label="设置">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
             </div>
         </aside>
+
+        <!-- 侧边栏遮罩（移动端） -->
         <div id="sidebar-overlay"></div>
+
+        <!-- 主聊天区 -->
         <main id="chat-main">
+            <!-- 顶栏 -->
             <header id="top-bar">
-                <button id="menu-btn" class="btn-icon" title="菜单">
+                <button id="menu-btn" class="btn-icon" title="菜单" aria-label="打开菜单">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
                 <div id="chat-title" class="chat-title">新对话</div>
                 <div class="top-bar-actions">
-                    <button id="summary-btn" class="btn-icon" title="总结对话">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    <button id="search-msg-btn" class="btn-icon" title="搜索消息 (Ctrl+F)" aria-label="搜索消息">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     </button>
-                    <button id="fullscreen-btn" class="btn-icon" title="全屏">
+                    <button id="summary-btn" class="btn-icon" title="总结对话 (Ctrl+Shift+S)" aria-label="总结对话">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 8 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                    </button>
+                    <button id="export-btn-top" class="btn-icon" title="导出对话" aria-label="导出对话">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button id="fullscreen-btn" class="btn-icon" title="全屏" aria-label="全屏">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
                     </button>
                 </div>
             </header>
-            <div id="messages" class="messages-container">
+
+            <!-- 消息搜索栏 -->
+            <div id="msg-search-bar" class="msg-search-bar">
+                <div class="msg-search-inner">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input type="text" id="msg-search-input" placeholder="搜索消息内容..." aria-label="搜索消息内容">
+                    <span id="msg-search-count" class="msg-search-count"></span>
+                    <button id="msg-search-close" class="btn-icon btn-sm" aria-label="关闭搜索">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="msg-search-nav">
+                    <button id="msg-search-prev" class="btn-icon btn-sm" aria-label="上一个" title="上一个匹配">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+                    </button>
+                    <button id="msg-search-next" class="btn-icon btn-sm" aria-label="下一个" title="下一个匹配">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 消息区 -->
+            <div id="messages" class="messages-container" role="log" aria-live="polite">
                 <div id="welcome-screen" class="welcome-screen">
+                    <div class="welcome-logo">
+                        <span class="welcome-logo-icon">&#10022;</span>
+                    </div>
                     <div class="welcome-greeting" id="welcome-greeting"></div>
                     <div class="welcome-sub" id="welcome-time"></div>
                     <div class="welcome-hints">
-                        <div class="hint-card" data-hint="帮我写一首关于春天的诗">
+                        <div class="hint-card hint-card-1" data-hint="帮我写一首关于春天的诗">
                             <span class="hint-icon">诗</span>
                             <span>帮我写一首关于春天的诗</span>
                         </div>
-                        <div class="hint-card" data-hint="用简单的语言解释什么是量子计算">
+                        <div class="hint-card hint-card-2" data-hint="用简单的语言解释什么是量子计算">
                             <span class="hint-icon">理</span>
                             <span>用简单的语言解释量子计算</span>
                         </div>
-                        <div class="hint-card" data-hint="推荐几部好看的电影">
+                        <div class="hint-card hint-card-3" data-hint="推荐几部好看的电影">
                             <span class="hint-icon">影</span>
                             <span>推荐几部好看的电影</span>
                         </div>
-                        <div class="hint-card" data-hint="给我讲一个有趣的故事">
+                        <div class="hint-card hint-card-4" data-hint="给我讲一个有趣的故事">
                             <span class="hint-icon">故</span>
                             <span>给我讲一个有趣的故事</span>
                         </div>
                     </div>
+                    <div class="welcome-shortcuts">
+                        <span class="shortcut-tag">Ctrl+N 新建</span>
+                        <span class="shortcut-tag">Enter 发送</span>
+                        <span class="shortcut-tag">Shift+Enter 换行</span>
+                        <span class="shortcut-tag">Ctrl+F 搜索</span>
+                    </div>
                 </div>
             </div>
+
+            <!-- 滚动到底部按钮 -->
+            <button id="scroll-bottom-btn" class="scroll-bottom-btn" title="回到底部" aria-label="回到底部">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+
+            <!-- 输入区 -->
             <div id="input-area" class="input-area">
-                <div class="input-wrapper">
-                    <textarea id="chat-input" placeholder="输入消息..." rows="1"></textarea>
+                <div class="input-wrapper" id="input-wrapper">
+                    <textarea id="chat-input" placeholder="输入消息..." rows="1" aria-label="消息输入框"></textarea>
                     <div class="input-actions">
-                        <button id="send-btn" class="btn-send" title="发送">
+                        <div id="char-count" class="char-count" title="字符数/Token"></div>
+                        <button id="send-btn" class="btn-send" title="发送 (Enter)" aria-label="发送消息" disabled>
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                         </button>
-                        <button id="stop-btn" class="btn-stop" title="停止" style="display:none;">
-                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                        <button id="stop-btn" class="btn-stop" title="停止生成" aria-label="停止生成" style="display:none;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
                         </button>
                     </div>
                 </div>
@@ -91,11 +169,52 @@
             </div>
         </main>
     </div>
+
+    <!-- 右键菜单 -->
+    <div id="context-menu" class="context-menu" role="menu">
+        <div class="ctx-item" data-action="copy" role="menuitem">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>复制</span>
+        </div>
+        <div class="ctx-item ctx-item-user-only" data-action="edit" role="menuitem">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            <span>编辑并重新发送</span>
+        </div>
+        <div class="ctx-item ctx-item-ai-only" data-action="regenerate" role="menuitem">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <span>重新生成</span>
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item ctx-item-danger" data-action="delete" role="menuitem">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span>删除</span>
+        </div>
+    </div>
+
+    <!-- 编辑消息对话框 -->
+    <div id="edit-overlay" class="settings-overlay"></div>
+    <div id="edit-panel" class="edit-panel" role="dialog" aria-label="编辑消息">
+        <div class="edit-header">
+            <h3>编辑消息</h3>
+            <button id="close-edit" class="btn-icon" aria-label="关闭编辑">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="edit-body">
+            <textarea id="edit-input" placeholder="编辑消息内容..." rows="5" aria-label="编辑消息内容"></textarea>
+            <div class="edit-actions">
+                <button id="edit-cancel" class="btn-action btn-secondary">取消</button>
+                <button id="edit-confirm" class="btn-action btn-primary">重新发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置面板 -->
     <div id="settings-overlay" class="settings-overlay"></div>
-    <div id="settings-panel" class="settings-panel">
+    <div id="settings-panel" class="settings-panel" role="dialog" aria-label="设置面板">
         <div class="settings-header">
             <h3>设置</h3>
-            <button id="close-settings" class="btn-icon">
+            <button id="close-settings" class="btn-icon" aria-label="关闭设置">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
@@ -105,13 +224,18 @@
                 <div class="setting-item">
                     <label>主题</label>
                     <select id="set-theme">
-                        <option value="auto">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option>
+                        <option value="auto">跟随系统</option>
+                        <option value="light">浅色</option>
+                        <option value="dark">深色</option>
                     </select>
                 </div>
                 <div class="setting-item">
                     <label>气泡样式</label>
                     <select id="set-bubble">
-                        <option value="modern">现代简约</option><option value="ios">毛玻璃</option><option value="water">水玻璃</option><option value="none">无气泡</option>
+                        <option value="modern">现代简约</option>
+                        <option value="ios">毛玻璃</option>
+                        <option value="water">水玻璃</option>
+                        <option value="none">无气泡</option>
                     </select>
                 </div>
                 <div class="setting-item">
@@ -163,12 +287,31 @@
             </div>
             <div class="settings-section">
                 <div class="section-title">数据</div>
-                <button id="export-btn" class="btn-action btn-secondary">导出对话</button>
+                <button id="export-btn" class="btn-action btn-secondary">导出当前对话</button>
                 <button id="clear-conv" class="btn-action btn-danger">清空当前对话</button>
                 <button id="clear-all" class="btn-action btn-danger">清空所有数据</button>
             </div>
         </div>
     </div>
+
+    <!-- 重命名对话框 -->
+    <div id="rename-overlay" class="settings-overlay"></div>
+    <div id="rename-panel" class="rename-panel" role="dialog" aria-label="重命名对话">
+        <div class="rename-header">
+            <h3>重命名对话</h3>
+        </div>
+        <div class="rename-body">
+            <input type="text" id="rename-input" placeholder="输入新名称..." maxlength="50" aria-label="对话名称">
+            <div class="rename-actions">
+                <button id="rename-cancel" class="btn-action btn-secondary">取消</button>
+                <button id="rename-confirm" class="btn-action btn-primary">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div id="toast-container" class="toast-container"></div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
     <script src="js/app.js"></script>
