@@ -162,7 +162,10 @@ html, body {
     z-index: -2;
     background-size: cover;
     background-position: center;
-    transition: filter var(--transition-slow);
+    background-repeat: no-repeat;
+    display: none;
+    pointer-events: none;
+    transition: filter var(--transition-slow), opacity var(--transition-slow);
 }
 
 #bg-mask {
