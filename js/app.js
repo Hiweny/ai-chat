@@ -10,17 +10,19 @@
     const API_URL = 'https://free-api.cnmwx.com/v1/completions';
     const REQUEST_TIMEOUT = 45000;
     const STORAGE_KEY = 'aichat_v2';
-    const DOM_CLEANUP_THRESHOLD = 200;
-    const RAF_THROTTLE_MS = 32;
+    const DOM_CLEANUP_THRESHOLD = 200; // 消息数量阈值，超过后清理旧DOM
+    const RAF_THROTTLE_MS = 32; // ~30fps 流式渲染节流
 
     // ========== 增强广告过滤规则 ==========
     const AD_FILTERS = [
+        // 原有规则
         /欢迎使用\s*公益站!\s*站长合作邮箱：wxgpt@qq\.com/gi,
         /<br\s*\/?>/gi,
         /公益站.*?站长合作邮箱/gi,
         /https?:\/\/wxgpt\.qq\.com/gi,
         /请勿用于.*?违规用途/gi,
         /本站不承担.*?责任/gi,
+        // 新增规则
         /免费使用.*?(?:推广|推荐|注册|下载)/gi,
         /公益.*?(?:站|平台|服务)/gi,
         /https?:\/\/[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]{10,}/gi,
@@ -49,17 +51,22 @@
         showTimestamp: false,
     };
 
+    // 智能滚动状态
     let userScrolledUp = false;
     let isNearBottom = true;
 
+    // 消息搜索状态
     let msgSearchMatches = [];
     let msgSearchIndex = -1;
 
+    // 右键菜单目标
     let contextMenuTarget = null;
 
+    // 流式渲染 RAF 节流
     let rafPending = false;
     let lastRenderTime = 0;
 
+    // 网络状态
     let isOnline = navigator.onLine;
 
     // ========== DOM 引用 ==========
@@ -88,6 +95,7 @@
     const renameInput = $('#rename-input');
     const inputWrapper = $('#input-wrapper');
 
+    // 新增 DOM 引用
     const networkStatus = $('#network-status');
     const contextMenu = $('#context-menu');
     const editOverlay = $('#edit-overlay');
@@ -103,15 +111,18 @@
     // ========== 工具函数 ==========
     const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
+    // 增强广告过滤
     const filterAd = (text) => {
         let cleaned = text;
         for (const regex of AD_FILTERS) {
             cleaned = cleaned.replace(regex, '');
         }
+        // 过滤过多空行（3个以上连续换行压缩为2个）
         cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
         return cleaned.trim();
     };
 
+    // 修复：中文欢迎语
     const getTimeGreeting = () => {
         const h = new Date().getHours();
         if (h >= 5 && h < 12) return '\u2600\ufe0f 早上好';
@@ -139,6 +150,7 @@
         return Math.round(cjk / 1.5 + other / 4);
     }
 
+    // ========== Toast 通知 ==========
     function showToast(message, type = 'info', duration = 2500) {
         const container = $('#toast-container');
         if (!container) return;
@@ -152,6 +164,7 @@
         }, duration);
     }
 
+    // ========== 存储 ==========
     function saveAll() {
         const data = { conversations, activeConvId, settings, userProfile, aiProfile };
         try {
@@ -182,6 +195,7 @@
         } catch (e) { console.error('加载配置失败', e); }
     }
 
+    // ========== 当前对话 ==========
     function currentConv() {
         return activeConvId && conversations[activeConvId] ? conversations[activeConvId] : null;
     }
@@ -196,6 +210,7 @@
         return conv ? conv.summary || '' : '';
     }
 
+    // ========== 对话统计 ==========
     function updateStats() {
         const convCount = Object.keys(conversations).length;
         let msgCount = 0;
@@ -206,6 +221,7 @@
         if (statsMsgCount) statsMsgCount.textContent = `${msgCount} 条消息`;
     }
 
+    // ========== 构建 prompt ==========
     function buildPrompt(userMsg) {
         const parts = [];
         parts.push(`[当前时间: ${getTimeString()}]`);
@@ -220,9 +236,11 @@
         return parts.join('\n');
     }
 
+    // ========== Markdown 渲染 ==========
     function renderMarkdown(text) {
         if (!converter) return escapeHTML(text);
         let html = converter.makeHtml(text);
+        // 代码块包装 + 复制按钮
         html = html.replace(/<pre><code([^>]*)>/g, (match, attrs) => {
             return `<div class="code-block-wrapper"><button class="code-copy-btn" onclick="window.__copyCode(this)" title="复制代码">\u{1f4cb}</button><pre><code${attrs}>`;
         });
@@ -242,6 +260,7 @@
         }
     };
 
+    // ========== 头像 HTML ==========
     function getAvatarHTML(profile, role, size = 36) {
         if (profile.avatar && profile.avatar.trim()) {
             return `<div class="avatar"><img src="${escapeAttr(profile.avatar)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
@@ -251,6 +270,7 @@
         return `<div class="avatar"><div class="avatar-default avatar-${role}">${emoji}</div></div>`;
     }
 
+    // ========== HTML 转义 ==========
     function escapeHTML(str) {
         const div = document.createElement('div');
         div.textContent = str;
@@ -261,6 +281,7 @@
         return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
+    // ========== 智能滚动 ==========
     function checkNearBottom() {
         const el = messagesContainer;
         const threshold = 100;
@@ -288,12 +309,14 @@
         }
     }
 
+    // ========== 渲染消息 ==========
     function renderMessage(msg, animate = true, skipScroll = false) {
         hideWelcome();
 
         const row = document.createElement('div');
         row.className = `msg-row ${msg.role}`;
         if (!animate) row.classList.add('no-anim');
+        // 存储消息引用用于右键菜单
         row.dataset.msgId = msg.id || '';
 
         const profile = msg.role === 'user' ? userProfile : aiProfile;
@@ -312,6 +335,7 @@
         }
         bubble.appendChild(contentDiv);
 
+        // 元信息行（时间戳 + token估算）
         if (settings.showTimestamp && msg.timestamp) {
             const meta = document.createElement('div');
             meta.className = 'msg-meta';
@@ -328,6 +352,7 @@
             bubble.appendChild(meta);
         }
 
+        // 复制按钮
         const copyBtn = document.createElement('button');
         copyBtn.className = 'bubble-copy';
         copyBtn.innerHTML = '\u{1f4cb}';
@@ -344,6 +369,7 @@
         });
         bubble.appendChild(copyBtn);
 
+        // AI消息操作按钮（重新生成）
         if (msg.role === 'assistant') {
             const actions = document.createElement('div');
             actions.className = 'bubble-actions';
@@ -362,6 +388,7 @@
             row.appendChild(bubble);
         }
 
+        // 右键菜单事件
         row.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             showContextMenu(e.clientX, e.clientY, msg, row);
@@ -401,6 +428,7 @@
         }
     }
 
+    // ========== 内存管理：长对话清理旧DOM ==========
     function cleanupOldDOMNodes() {
         const children = messagesContainer.children;
         const msgRows = messagesContainer.querySelectorAll('.msg-row');
@@ -412,6 +440,7 @@
         }
     }
 
+    // ========== 流式渲染 RAF 节流 ==========
     function throttledRender(aiContent, text) {
         if (rafPending) return;
         const now = performance.now();
@@ -427,27 +456,41 @@
         });
     }
 
+    // ========== 重新生成 ==========
     async function regenerateMessage(msg) {
         if (isGenerating) return;
+
         const msgs = getMessages();
         const idx = msgs.indexOf(msg);
         if (idx < 0) return;
+
         if (idx === 0 || msgs[idx - 1].role !== 'user') {
             showToast('无法重新生成此消息', 'warning');
             return;
         }
+
+        // 移除这条AI消息
         msgs.splice(idx, 1);
+
+        // 重建UI
         rebuildMessagesUI();
+
+        // 获取用户消息
         const userMsg = msgs[idx - 1].content;
+
         await sendForRegenerate(userMsg);
     }
 
     async function sendForRegenerate(userMsg) {
         if (isGenerating) return;
+
         const prompt = buildPrompt(userMsg);
+
+        // 创建AI气泡 - 修复：aiRow 已有 position:relative
         const aiRow = document.createElement('div');
         aiRow.className = 'msg-row assistant';
         aiRow.innerHTML = getAvatarHTML(aiProfile, 'assistant');
+
         const aiBubble = document.createElement('div');
         aiBubble.className = `bubble ${settings.bubbleStyle} assistant`;
         const aiContent = document.createElement('div');
@@ -525,8 +568,10 @@
         }
     }
 
+    // 重试重新生成（挂到全局）
     window.__retryRegenerate = function () {
         const msgs = getMessages();
+        // 找到最后一条用户消息重新生成
         for (let i = msgs.length - 1; i >= 0; i--) {
             if (msgs[i].role === 'user') {
                 const userMsg = msgs[i].content;
@@ -537,14 +582,17 @@
         }
     };
 
+    // ========== 发送消息 ==========
     async function sendMessage(overrideText) {
         if (isGenerating) return;
         const userMsg = (overrideText || chatInput.value).trim();
         if (!userMsg) return;
 
+        // 发送按钮动画
         sendBtn.classList.add('sending');
         setTimeout(() => sendBtn.classList.remove('sending'), 400);
 
+        // 如果没有活跃对话，创建一个
         if (!activeConvId || !conversations[activeConvId]) {
             createConversation(userMsg.slice(0, 30));
         }
@@ -554,10 +602,12 @@
         updateCharCount();
         updateSendButtonState();
 
+        // 添加用户消息
         const userMsgObj = { role: 'user', content: userMsg, timestamp: Date.now(), id: uid() };
         getMessages().push(userMsgObj);
         renderMessage(userMsgObj, true);
 
+        // 更新标题
         const conv = currentConv();
         if (conv && getMessages().filter(m => m.role === 'user').length === 1) {
             conv.title = userMsg.slice(0, 30) + (userMsg.length > 30 ? '...' : '');
@@ -565,14 +615,17 @@
             updateChatTitle();
         }
 
+        // 上下文长度检查
         const prompt = buildPrompt(userMsg);
         if (prompt.length > settings.maxPromptLength) {
             renderSystemMessage(`\u26a0\ufe0f 上下文较长 (${prompt.length}字符)，建议手动总结`);
         }
 
+        // 创建AI气泡
         const aiRow = document.createElement('div');
         aiRow.className = 'msg-row assistant';
         aiRow.innerHTML = getAvatarHTML(aiProfile, 'assistant');
+
         const aiBubble = document.createElement('div');
         aiBubble.className = `bubble ${settings.bubbleStyle} assistant`;
         const aiContent = document.createElement('div');
@@ -637,9 +690,11 @@
                 }
             } else {
                 aiContent.innerHTML = `<div style="color:var(--danger);">\u26a0\ufe0f ${err.message || '网络或服务异常'}</div><div class="msg-error-actions"><button class="msg-retry-btn">\ud83d\udd04 重试</button></div>`;
+                // 重试按钮绑定
                 const retryBtn = aiContent.querySelector('.msg-retry-btn');
                 if (retryBtn) {
                     retryBtn.addEventListener('click', () => {
+                        // 移除错误气泡和对应的user消息记录
                         const msgs = getMessages();
                         if (msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
                             msgs.pop();
@@ -658,12 +713,14 @@
             saveAll();
             updateContextUsage();
             updateStats();
+            // 内存清理
             cleanupOldDOMNodes();
         }
     }
 
     function stopGeneration() { if (abortController) abortController.abort(); }
 
+    // ========== 输入状态管理 ==========
     function updateInputState() {
         if (isGenerating) {
             sendBtn.style.display = 'none';
@@ -681,6 +738,7 @@
         sendBtn.disabled = !hasContent || isGenerating;
     }
 
+    // ========== 消息编辑 ==========
     function showEditDialog(msg) {
         if (isGenerating) return;
         contextMenuTarget = msg;
@@ -703,17 +761,29 @@
             showToast('消息内容不能为空', 'warning');
             return;
         }
+
         const msgs = getMessages();
         const idx = msgs.indexOf(contextMenuTarget);
-        if (idx < 0) { closeEditDialog(); return; }
+        if (idx < 0) {
+            closeEditDialog();
+            return;
+        }
+
+        // 更新消息内容
         contextMenuTarget.content = newContent;
         contextMenuTarget.timestamp = Date.now();
+
+        // 删除该消息之后的所有消息
         msgs.splice(idx + 1);
+
         closeEditDialog();
+
+        // 重建UI并发送
         rebuildMessagesUI();
         sendMessage(newContent);
     }
 
+    // ========== 消息搜索 ==========
     function toggleMsgSearch(show) {
         if (show) {
             msgSearchBar.classList.add('active');
@@ -733,17 +803,28 @@
         clearMsgSearchHighlights();
         msgSearchMatches = [];
         msgSearchIndex = -1;
-        if (!query.trim()) { msgSearchCount.textContent = ''; return; }
+
+        if (!query.trim()) {
+            msgSearchCount.textContent = '';
+            return;
+        }
+
         const q = query.toLowerCase();
         const rows = messagesContainer.querySelectorAll('.msg-row');
+
         rows.forEach(row => {
             const bubble = row.querySelector('.bubble-content');
             if (!bubble) return;
             const text = bubble.textContent.toLowerCase();
-            if (text.includes(q)) { msgSearchMatches.push(row); }
+            if (text.includes(q)) {
+                msgSearchMatches.push(row);
+            }
         });
+
         msgSearchCount.textContent = msgSearchMatches.length > 0
-            ? `1/${msgSearchMatches.length}` : '无匹配';
+            ? `1/${msgSearchMatches.length}`
+            : '无匹配';
+
         if (msgSearchMatches.length > 0) {
             msgSearchIndex = 0;
             highlightCurrentMatch();
@@ -752,6 +833,7 @@
 
     function navigateMsgSearch(direction) {
         if (msgSearchMatches.length === 0) return;
+        // 清除旧高亮
         if (msgSearchMatches[msgSearchIndex]) {
             msgSearchMatches[msgSearchIndex].classList.remove('msg-highlight');
         }
@@ -765,6 +847,7 @@
         if (!row) return;
         row.classList.add('msg-highlight');
         row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // 移除高亮动画
         setTimeout(() => row.classList.remove('msg-highlight'), 600);
     }
 
@@ -774,15 +857,22 @@
         });
     }
 
+    // ========== 右键菜单 ==========
     function showContextMenu(x, y, msg, rowEl) {
         contextMenuTarget = msg;
+
+        // 根据消息角色显隐菜单项
         const userOnly = contextMenu.querySelectorAll('.ctx-item-user-only');
         const aiOnly = contextMenu.querySelectorAll('.ctx-item-ai-only');
         userOnly.forEach(el => el.style.display = msg.role === 'user' ? 'flex' : 'none');
         aiOnly.forEach(el => el.style.display = msg.role === 'assistant' ? 'flex' : 'none');
+
+        // 定位
         contextMenu.style.left = x + 'px';
         contextMenu.style.top = y + 'px';
         contextMenu.classList.add('active');
+
+        // 防止超出视窗
         requestAnimationFrame(() => {
             const rect = contextMenu.getBoundingClientRect();
             if (rect.right > window.innerWidth) {
@@ -803,16 +893,23 @@
         if (!contextMenuTarget) return;
         const msg = contextMenuTarget;
         hideContextMenu();
+
         switch (action) {
             case 'copy': {
-                const txt = msg.content;
+                const txt = msg.role === 'user' ? msg.content : msg.content;
                 navigator.clipboard.writeText(filterAd(txt)).then(() => {
                     showToast('已复制到剪贴板', 'success', 1500);
                 }).catch(() => showToast('复制失败', 'error'));
                 break;
             }
-            case 'edit': { showEditDialog(msg); break; }
-            case 'regenerate': { regenerateMessage(msg); break; }
+            case 'edit': {
+                showEditDialog(msg);
+                break;
+            }
+            case 'regenerate': {
+                regenerateMessage(msg);
+                break;
+            }
             case 'delete': {
                 const msgs = getMessages();
                 const idx = msgs.indexOf(msg);
@@ -828,12 +925,14 @@
         }
     }
 
+    // ========== 网络状态检测 ==========
     function updateNetworkStatus() {
         if (networkStatus) {
             networkStatus.classList.toggle('visible', !isOnline);
         }
     }
 
+    // ========== 手动总结 ==========
     async function manualSummary() {
         if (isGenerating) return;
         const conv = currentConv();
@@ -899,6 +998,7 @@ ${conversationText}
         }
     }
 
+    // ========== 对话管理 ==========
     function createConversation(title, focusInput = true) {
         const id = uid();
         conversations[id] = {
@@ -1014,6 +1114,7 @@ ${conversationText}
         showToast('所有数据已清空', 'info');
     }
 
+    // ========== UI 渲染 ==========
     function clearMessagesUI() {
         const children = Array.from(messagesContainer.children);
         children.forEach(child => {
@@ -1041,12 +1142,14 @@ ${conversationText}
         chatTitle.textContent = conv ? conv.title : '新对话';
     }
 
+    // 日期标签
     function getDateLabel(timestamp) {
         const now = new Date();
         const date = new Date(timestamp);
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const yesterday = new Date(today.getTime() - 86400000);
         const weekAgo = new Date(today.getTime() - 7 * 86400000);
+
         if (date >= today) return '今天';
         if (date >= yesterday) return '昨天';
         if (date >= weekAgo) return '最近七天';
@@ -1073,6 +1176,7 @@ ${conversationText}
             return;
         }
 
+        // 按日期分组
         let lastDateLabel = '';
         for (const id of filtered) {
             const conv = conversations[id];
@@ -1090,6 +1194,7 @@ ${conversationText}
             item.className = `chat-list-item ${id === activeConvId ? 'active' : ''}`;
             item.setAttribute('role', 'listitem');
 
+            // 最后一条消息预览
             const lastMsg = conv.messages.length > 0
                 ? conv.messages[conv.messages.length - 1].content
                 : '';
@@ -1137,6 +1242,7 @@ ${conversationText}
         if (len > 1500) charCount.classList.add('danger');
     }
 
+    // ========== 侧边栏 ==========
     function openSidebar() {
         sidebar.classList.add('open');
         sidebarOverlay.classList.add('active');
@@ -1147,9 +1253,11 @@ ${conversationText}
         sidebarOverlay.classList.remove('active');
     }
 
+    // ========== 设置面板 ==========
     function openSettings() {
         settingsOverlay.classList.add('active');
         settingsPanel.classList.add('active');
+        // 填充值
         $('#set-theme').value = settings.colorScheme;
         $('#set-bubble').value = settings.bubbleStyle;
         $('#set-timestamp').checked = settings.showTimestamp;
@@ -1175,15 +1283,18 @@ ${conversationText}
         settings.recentRounds = parseInt($('#set-rounds').value) || 8;
         userProfile.avatar = $('#set-useravatar').value.trim();
         aiProfile.avatar = $('#set-aiavatar').value.trim();
+
         applyTheme();
         applyBackground();
         applyHighlightTheme();
         saveAll();
         rebuildMessagesUI();
+
         settingsOverlay.classList.remove('active');
         settingsPanel.classList.remove('active');
     }
 
+    // ========== 主题与背景 ==========
     function applyTheme() {
         document.documentElement.setAttribute('data-theme', settings.colorScheme);
     }
@@ -1226,6 +1337,7 @@ ${conversationText}
         }
     }
 
+    // ========== 导出对话 ==========
     function exportConversation() {
         const conv = currentConv();
         if (!conv || conv.messages.length === 0) {
@@ -1253,15 +1365,19 @@ ${conversationText}
         showToast('对话已导出', 'success');
     }
 
+    // ========== 输入框 ==========
     function autoResizeInput() {
         chatInput.style.height = 'auto';
         chatInput.style.height = Math.min(chatInput.scrollHeight, 150) + 'px';
     }
 
+    // ========== 事件绑定 ==========
     function bindEvents() {
+        // 发送
         sendBtn.addEventListener('click', () => sendMessage());
         stopBtn.addEventListener('click', stopGeneration);
 
+        // 输入框
         chatInput.addEventListener('input', () => {
             autoResizeInput();
             updateCharCount();
@@ -1274,6 +1390,7 @@ ${conversationText}
             }
         });
 
+        // 粘贴图片提示
         chatInput.addEventListener('paste', (e) => {
             const items = e.clipboardData?.items;
             if (items) {
@@ -1287,6 +1404,7 @@ ${conversationText}
             }
         });
 
+        // 拖拽文件提示
         inputWrapper.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -1306,12 +1424,14 @@ ${conversationText}
             }
         });
 
+        // 字符计数
         charCount.addEventListener('click', () => {
             const len = chatInput.value.length;
             const tokens = estimateTokens(chatInput.value);
             showToast(`字符: ${len} | 预估 tokens: ~${tokens}`, 'info', 2000);
         });
 
+        // 欢迎提示卡片
         $$('.hint-card').forEach(card => {
             card.addEventListener('click', () => {
                 const hint = card.getAttribute('data-hint');
@@ -1319,13 +1439,18 @@ ${conversationText}
             });
         });
 
-        messagesContainer.addEventListener('scroll', () => { updateScrollButton(); });
+        // 滚动控制
+        messagesContainer.addEventListener('scroll', () => {
+            updateScrollButton();
+        });
 
+        // 滚动到底部按钮
         scrollBottomBtn.addEventListener('click', () => {
             scrollToBottom(true);
             userScrolledUp = false;
         });
 
+        // 侧边栏
         $('#menu-btn').addEventListener('click', openSidebar);
         sidebarOverlay.addEventListener('click', closeSidebar);
         $('#new-chat-btn').addEventListener('click', () => {
@@ -1333,29 +1458,40 @@ ${conversationText}
             closeSidebar();
         });
 
+        // 搜索对话
         chatSearch.addEventListener('input', (e) => {
             searchQuery = e.target.value.trim();
             renderChatList();
         });
 
+        // 顶栏按钮
         $('#summary-btn').addEventListener('click', manualSummary);
         $('#fullscreen-btn').addEventListener('click', toggleFullscreen);
         $('#export-btn-top').addEventListener('click', exportConversation);
 
+        // 消息搜索
         $('#search-msg-btn').addEventListener('click', () => toggleMsgSearch(true));
         $('#msg-search-close').addEventListener('click', () => toggleMsgSearch(false));
-        msgSearchInput.addEventListener('input', (e) => { performMsgSearch(e.target.value); });
+        msgSearchInput.addEventListener('input', (e) => {
+            performMsgSearch(e.target.value);
+        });
         msgSearchInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { navigateMsgSearch(e.shiftKey ? -1 : 1); }
-            if (e.key === 'Escape') { toggleMsgSearch(false); }
+            if (e.key === 'Enter') {
+                navigateMsgSearch(e.shiftKey ? -1 : 1);
+            }
+            if (e.key === 'Escape') {
+                toggleMsgSearch(false);
+            }
         });
         $('#msg-search-prev').addEventListener('click', () => navigateMsgSearch(-1));
         $('#msg-search-next').addEventListener('click', () => navigateMsgSearch(1));
 
+        // 设置
         $('#sidebar-settings-btn').addEventListener('click', () => { openSettings(); closeSidebar(); });
         settingsOverlay.addEventListener('click', closeSettings);
         $('#close-settings').addEventListener('click', closeSettings);
 
+        // 设置内部事件
         $('#set-blur').addEventListener('input', (e) => {
             $('#blur-val').textContent = e.target.value;
             settings.backgroundBlur = parseFloat(e.target.value);
@@ -1391,12 +1527,15 @@ ${conversationText}
             saveAll();
         });
 
+        // 数据操作
         $('#export-btn').addEventListener('click', exportConversation);
         $('#clear-conv').addEventListener('click', clearCurrentConversation);
         $('#clear-all').addEventListener('click', clearAllData);
 
+        // 重命名
         renameOverlay.addEventListener('click', closeRename);
 
+        // 编辑对话框
         editOverlay.addEventListener('click', closeEditDialog);
         $('#close-edit').addEventListener('click', closeEditDialog);
         $('#edit-cancel').addEventListener('click', closeEditDialog);
@@ -1406,22 +1545,32 @@ ${conversationText}
                 e.preventDefault();
                 confirmEdit();
             }
-            if (e.key === 'Escape') { closeEditDialog(); }
+            if (e.key === 'Escape') {
+                closeEditDialog();
+            }
         });
 
+        // 右键菜单事件
         contextMenu.addEventListener('click', (e) => {
             const item = e.target.closest('.ctx-item');
-            if (item) { handleContextAction(item.dataset.action); }
+            if (item) {
+                handleContextAction(item.dataset.action);
+            }
         });
 
         document.addEventListener('click', (e) => {
-            if (!contextMenu.contains(e.target)) { hideContextMenu(); }
+            if (!contextMenu.contains(e.target)) {
+                hideContextMenu();
+            }
         });
 
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') { hideContextMenu(); }
+            if (e.key === 'Escape') {
+                hideContextMenu();
+            }
         });
 
+        // 主题变化
         window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
             if (settings.colorScheme === 'auto') {
                 applyTheme();
@@ -1430,11 +1579,14 @@ ${conversationText}
             }
         });
 
+        // 快捷键
         document.addEventListener('keydown', (e) => {
+            // Ctrl+N 新建对话
             if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
                 e.preventDefault();
                 createConversation('新对话');
             }
+            // Escape 关闭面板
             if (e.key === 'Escape') {
                 if (settingsPanel.classList.contains('active')) closeSettings();
                 if (renamePanel.classList.contains('active')) closeRename();
@@ -1442,11 +1594,14 @@ ${conversationText}
                 if (msgSearchBar.classList.contains('active')) toggleMsgSearch(false);
                 if (sidebar.classList.contains('open')) closeSidebar();
             }
+            // Ctrl+Shift+S 总结
             if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
                 e.preventDefault();
                 manualSummary();
             }
+            // Ctrl+F 消息搜索
             if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                // 只在非输入框焦点时触发
                 if (document.activeElement !== chatInput && document.activeElement !== msgSearchInput) {
                     e.preventDefault();
                     toggleMsgSearch(true);
@@ -1454,6 +1609,7 @@ ${conversationText}
             }
         });
 
+        // 网络状态
         window.addEventListener('online', () => {
             isOnline = true;
             updateNetworkStatus();
@@ -1465,8 +1621,10 @@ ${conversationText}
             showToast('网络连接已断开', 'error', 3000);
         });
 
+        // 页面关闭前保存
         window.addEventListener('beforeunload', saveAll);
 
+        // 移动端键盘适配
         if (window.visualViewport) {
             const viewport = window.visualViewport;
             const inputArea = $('#input-area');
@@ -1480,6 +1638,7 @@ ${conversationText}
         }
     }
 
+    // ========== 初始化 ==========
     function init() {
         if (typeof showdown === 'undefined') { setTimeout(init, 200); return; }
 
@@ -1505,6 +1664,7 @@ ${conversationText}
         renderChatList();
         updateStats();
 
+        // 恢复活跃对话
         if (activeConvId && conversations[activeConvId]) {
             rebuildMessagesUI();
         } else {
