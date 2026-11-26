@@ -38,9 +38,13 @@ jobs:
       - name: Install Pillow
         run: python3 -m pip install --quiet pillow
 
-      - name: Flicker check (screencast)
+      - name: Flicker capture (A/B 三种实现)
         continue-on-error: true
-        run: node .github/flicker-test.mjs
+        run: node .github/flicker-capture.mjs
+
+      - name: Flicker analyze
+        continue-on-error: true
+        run: python3 .github/flicker-analyze.py flicker-out
 
       - name: Also test deployed site
         if: always()
