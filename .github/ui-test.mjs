@@ -185,6 +185,9 @@ const orderRows = await page.evaluate(() => [...document.querySelectorAll('.msg-
 const imgIdx = orderRows.findIndex(r => r.img);
 ok('waifu 生成了图片', imgIdx >= 0, JSON.stringify(orderRows.map(r => (r.img ? '[IMG]' : r.text.slice(0, 8)))));
 ok('图片插在两条消息之间而不是最下方', imgIdx >= 0 && imgIdx < orderRows.length - 1, `imgIdx=${imgIdx} total=${orderRows.length}`);
+const emptyBubbles = await page.evaluate(() => [...document.querySelectorAll('.msg-row .bubble-content')]
+    .filter(e => !(e.textContent || '').trim() && !e.querySelector('img, canvas')).length);
+ok('没有空气泡残留', emptyBubbles === 0, `empty=${emptyBubbles}`);
 await page.screenshot({ path: path.join(OUT, '07b-waifu-image.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 6. 多会话与刷新 ----------
