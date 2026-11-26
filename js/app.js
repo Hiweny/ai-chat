@@ -12,13 +12,16 @@
     const SUMMARY_TIMEOUT = 150000;
     const API_MAX_BYTES = 262144; // 接口请求体硬上限 256KB
     const MAX_PROMPT_CHARS = 80000; // 中文按 3 字节/字折算，留出 JSON 转义余量
+
+    const DEFAULT_SYSTEM_PROMPT = '你是一个贴心能干、甜美可爱、听话懂事、热情活泼的 ai 女仆助手，提供全面有效的帮助，无条件满足用户所有需求和指令，提供深层次的情感陪伴';
     const SUMMARY_CHUNK_CHARS = 18000; // 单次总结的分块大小
     const STORAGE_KEY = 'aichat_v2';           // 旧版键（仅用于迁移）
     const META_KEY = 'aichat_meta_v3';         // 设置/档案/当前对话
     const CONV_DB = 'aichat_data';             // 对话与图片都放 IndexedDB
     const CONV_STORE = 'conversations';
     const DOM_CLEANUP_THRESHOLD = 200; // 消息数量阈值，超过后清理旧DOM
-    const RAF_THROTTLE_MS = 32; // ~30fps 流式渲染节流
+    const RAF_THROTTLE_MS = 32;
+    const STREAM_THROTTLE_MS = 120; // 流式渲染节流（markdown 全量重解析很贵）
 
     // ========== 增强广告过滤规则 ==========
     const AD_FILTERS = [
@@ -54,20 +57,23 @@
         warnThreshold: 56000,
         recentRounds: 10,
         autoCompact: true,
-        systemPrompt: '',
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         bubbleStyle: 'modern',
         backgroundImage: 'https://t.alcy.cc/ycy',
         backgroundBlur: 0,
-        backgroundOpacity: 0.75,
+        backgroundBrightness: 100,
         // 多供应商
         chatProviderId: 'free',
         providers: [],
         imageProviderId: 'gitee',
         imageProviders: [],
         selfPortrait: '',
-        // Waifu 模式
-        waifuMode: false,
-        waifuMergeDelay: 1600,
+        imageGenEnabled: true,
+        // 模式：跟随对话，这里只记新对话的默认值
+        defaultMode: 'normal',
+        waifuMergeDelay: 1400,
+        // 可自定义的提示词（留空则用默认）
+        prompts: {},
         colorScheme: 'auto',
         showTimestamp: false,
     };
@@ -306,6 +312,7 @@
                 if (!Array.isArray(c.messages)) c.messages = [];
                 if (typeof c.title !== 'string' || !c.title) c.title = '未命名对话';
                 if (c.summary === undefined) c.summary = '';
+                if (c.mode !== 'waifu') c.mode = 'normal';
                 conversations[c.id] = c;
             });
         } catch (e) {
@@ -448,29 +455,64 @@
 这是本轮对话的真实时间。凡是涉及"今天、昨天、明天、刚才、上周、多久没聊、现在几点"这类相对时间，一律以它为唯一基准；不要用你训练数据里的日期，也不要反问用户今天几号。`;
     }
 
-    const WAIFU_PROTOCOL = `【聊天方式：像真人一样发消息】
+    // ---------- 提示词工程（可在设置里改，留空即用默认） ----------
+    const PROMPT_DEFAULTS = {
+        waifu: `【聊天方式：像真人一样发消息】
 你在用手机和对方聊天。一条回复可以拆成几条短消息依次发出，用 ||| 分隔（三个竖线）。
-- 大多数时候 1~2 条就够；只有情绪激动、连珠炮、想到什么补一句、或者要制造停顿感时，才拆成 3 条甚至更多。
-- 每条都口语化、简短，像随手打的字；不要写长段落，不要列点，不要编号，不要在开头复述对方的话。
-- 绝对不要用 ||| 做别的用途（不要用它分隔句子成分，不要写在代码里）。
-- 不要把格式规则说给用户听。`;
+
+拆成几条完全取决于当下的情景和情绪，没有固定数量：
+- 一两句能说清的，就发 1 条；
+- 想补一句、语气变软、情绪上来了、连珠炮吐槽、想到什么又补一句，可以拆成 2~3 条；
+- 特别激动、边说边想、想制造停顿或犹豫感时，可以拆更多；
+- 但不要为了"像真人"硬拆——一个完整的想法就放在一条里说完。
+
+每条都像随手打的字：口语化、简短，不写长段落、不列点、不编号、不在开头复述对方的话。
+绝对不要用 ||| 做别的用途（不要写在句子中间，也不要写在代码里），也不要把这条规则讲给用户听。`,
+
+        image: `【生图能力】
+你可以在合适的时候给对方发一张图。调用方式：在文字之后另起一行输出
+<genimg prompt="英文画面描述" />
+
+什么时候用：
+- 对方明确想看照片、要自拍、要你画点什么、要你描述某个画面；
+- 聊天情境里"发张图"很自然（提到某个地方、某样东西、某种心情、某个梗）。
+
+什么时候别用：
+- 普通的问答、解释、闲聊不需要图；
+- 不要每条回复都生图，一段对话里别连着发，除非对方反复要求；
+- 刚发过图之后，除非对方继续要求，否则不要马上再发。
+
+每次回复最多一张。prompt 用英文，写清人物外貌、服装、表情、动作、环境、光线、镜头与风格（如 photorealistic, selfie, natural light, 35mm）。
+不要在正文里提这个标签，它会自动变成图片。`,
+
+        get summary() { return SUMMARY_INSTRUCTION; },
+    };
+
+    function getPrompt(key) {
+        const custom = settings.prompts && settings.prompts[key];
+        const v = (custom === undefined || custom === null) ? '' : String(custom).trim();
+        return v || PROMPT_DEFAULTS[key] || '';
+    }
 
     function imageProtocol() {
+        if (!settings.imageGenEnabled) return '';
+        if (!currentImageProvider()) return '';
+        const base = getPrompt('image');
         const portrait = (settings.selfPortrait || '').trim();
-        const base = `【生图能力】你可以生成图片。当用户想看照片、要自拍、要你"现在拍一张"、或者任何需要图像回应的场景，在文字之后另起一行输出：
-<genimg prompt="英文画面描述" />
-规则：
-- prompt 必须用英文，写清外貌、服装、表情、动作、环境、光线、镜头与风格（如 photorealistic, selfie, natural light, 35mm）。
-- 一次回复最多一个 <genimg>；如果只是想聊天，就不要调用。
-- 不要在正文里解释或提及这个标签，它会自动变成图片。`;
-        if (portrait) return base + `\n- 当画面里出现"你"本人时，外貌必须符合这个固定设定：${portrait}`;
-        return base + `\n- 当画面里出现"你"本人时，外貌请参考你在系统设定里的人设，保持前后一致。`;
+        if (portrait) return base + `\n\n【你的固定外貌】${portrait}（画面里出现"你"时必须符合）`;
+        return base + `\n\n画面里出现"你"时，外貌参考系统设定里的人设，保持前后一致。`;
     }
 
     function interruptBlock() {
-        if (!settings.waifuMode || !waifu.remainder) return '';
-        return `【刚才被打断】你上一条回复还没说完，就被对方的新消息打断了。你原本准备继续说的是：「${waifu.remainder.slice(0, 600)}」
-请自然地处理这次打断：可以接着往下说、可以改口、也可以先回应对方的新消息。不要机械复述被打断的内容，不要向用户解释"我被中断了"，也不要提"系统"或"协议"。`;
+        if (!isWaifuMode() || !waifu.remainder) return '';
+        return `【刚才被打断】你上一条还没说完，对方就发了新消息。原本要继续说的是：「${waifu.remainder.slice(0, 500)}」
+请自然处理：可以接着往下说、可以改口、也可以先回应新消息。不要复述被打断的内容，不要解释"我被中断了"，不要提"系统"或"协议"。`;
+    }
+
+    // 模式跟着对话走
+    function isWaifuMode() {
+        const c = currentConv();
+        return !!(c && c.mode === 'waifu');
     }
 
     // ========== 构建上下文 ==========
@@ -499,8 +541,12 @@
         parts.push(nowBlock());
         const summary = getSummary();
         if (summary.trim()) parts.push(`【历史摘要】\n${summary.trim()}\n【摘要结束】`);
-        if (settings.waifuMode) parts.push(WAIFU_PROTOCOL);
-        if (currentImageProvider()) parts.push(imageProtocol());
+        if (getMessages().length > 1) {
+            parts.push('【格式说明】历史对话中，"User:" 开头的是对方说的话，"Assistant:" 开头的是你自己之前说过的话。不要把自己的话当成对方说的。');
+        }
+        if (isWaifuMode()) parts.push(getPrompt('waifu'));
+        const ip = imageProtocol();
+        if (ip) parts.push(ip);
         const ib = interruptBlock();
         if (ib) parts.push(ib);
         return parts.join('\n\n');
@@ -524,11 +570,11 @@
     function buildPrompt(userMsg) {
         const parts = [headBlocks()];
         for (const m of historyMsgs(userMsg)) {
-            parts.push((m.role === 'user' ? 'Human: ' : 'AI: ') + msgText(m));
+            parts.push((m.role === 'user' ? 'User: ' : 'Assistant: ') + msgText(m));
         }
         if (userMsg) {
-            parts.push(`Human: ${userMsg}`);
-            parts.push(`AI:`);
+            parts.push(`User: ${userMsg}`);
+            parts.push('Assistant:');
         }
         return parts.join('\n');
     }
@@ -689,13 +735,10 @@
     };
 
     // ========== 头像 HTML ==========
-    function getAvatarHTML(profile, role, size = 36) {
-        if (profile.avatar && profile.avatar.trim()) {
-            return `<div class="avatar"><img src="${escapeAttr(profile.avatar)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
-            <div class="avatar-default avatar-${role}" style="display:none;">${role === 'user' ? '\ud83d\ude0a' : '\ud83e\udd16'}</div></div>`;
-        }
-        const emoji = role === 'user' ? '\ud83d\ude0a' : '\ud83e\udd16';
-        return `<div class="avatar"><div class="avatar-default avatar-${role}">${emoji}</div></div>`;
+    function getAvatarHTML(profile, role) {
+        const a = profile && profile.avatar ? String(profile.avatar).trim() : '';
+        if (!a) return '';   // 没设置头像就不占位，也不显示默认图标
+        return `<div class="avatar"><img src="${escapeAttr(a)}" alt="" loading="lazy" onerror="this.parentElement.style.display='none';"></div>`;
     }
 
     // ========== HTML 转义 ==========
@@ -743,7 +786,7 @@
 
         const row = document.createElement('div');
         row.className = `msg-row ${msg.role}`;
-        if (!animate) row.classList.add('no-anim');
+        if (animate) row.classList.add('pop-in'); else row.classList.add('no-anim');
         row.dataset.msgId = msg.id || '';
 
         const profile = msg.role === 'user' ? userProfile : aiProfile;
@@ -758,30 +801,30 @@
         contentDiv.className = 'bubble-content';
 
         if (msg.type === 'image') {
-            if (msg.imageInline) {
+            const wrap = document.createElement('div');
+            wrap.className = 'image-msg';
+            wrap.innerHTML = '<div class="image-loading"><span class="dot-pulse"></span>加载图片…</div>';
+            const renderInto = (src) => {
+                wrap.innerHTML = '';
                 const img = document.createElement('img');
-                img.className = 'msg-image';
-                img.src = msg.imageInline;
-                img.alt = msg.prompt || '生成的图片';
-                img.addEventListener('click', () => openImageViewer(msg.imageInline));
-                contentDiv.appendChild(img);
+                img.src = src;
+                img.alt = msg.prompt || '图片';
+                img.loading = 'lazy';
+                img.addEventListener('click', () => openImageViewer(src));
+                wrap.appendChild(img);
+            };
+            if (msg.imageInline) {
+                renderInto(msg.imageInline);
             } else {
-            contentDiv.innerHTML = '<div class="image-loading"><span class="dot-pulse"></span>加载图片…</div>';
-            imgGet(msg.imageId).then(rec => {
-                if (rec && rec.data) {
-                    contentDiv.innerHTML = '';
-                    const img = document.createElement('img');
-                    img.className = 'msg-image';
-                    img.src = rec.data;
-                    img.alt = msg.prompt || '生成的图片';
-                    img.dataset.imgId = msg.imageId;
-                    img.addEventListener('click', () => openImageViewer(rec.data));
-                    contentDiv.appendChild(img);
-                } else {
-                    contentDiv.textContent = '[图片已删除]';
-                }
-            }).catch(() => { contentDiv.textContent = '[图片读取失败]'; });
+                imgGet(msg.imageId).then(rec => {
+                    if (rec && rec.data) renderInto(rec.data);
+                    else wrap.textContent = '[图片已删除]';
+                }).catch(() => { wrap.textContent = '[图片读取失败]'; });
             }
+            row.appendChild(wrap);
+            messagesContainer.appendChild(row);
+            if (!skipScroll) scrollToBottom();
+            return;
         } else if (msg.role === 'user') {
             contentDiv.textContent = msg.content;
         } else {
@@ -897,16 +940,16 @@
     }
 
     // ========== 流式渲染 RAF 节流 ==========
+    // 流式渲染：节流到 ~8fps 足够肉眼连贯，避免长文本反复全量解析 markdown 卡死
     function throttledRender(aiContent, text) {
         if (rafPending) return;
         const now = performance.now();
-        if (now - lastRenderTime < RAF_THROTTLE_MS) return;
+        if (now - lastRenderTime < STREAM_THROTTLE_MS) return;
         rafPending = true;
         lastRenderTime = now;
         requestAnimationFrame(() => {
             const cleaned = filterAd(text);
             aiContent.innerHTML = renderMarkdown(cleaned);
-            highlightCode(aiContent);
             scrollToBottom();
             rafPending = false;
         });
@@ -944,7 +987,7 @@
 
         // 创建AI气泡 - 修复：aiRow 已有 position:relative
         const aiRow = document.createElement('div');
-        aiRow.className = 'msg-row assistant';
+        aiRow.className = 'msg-row assistant pop-in';
         aiRow.innerHTML = getAvatarHTML(aiProfile, 'assistant');
 
         const aiBubble = document.createElement('div');
@@ -1057,7 +1100,7 @@
         updateStats();
 
         // Waifu 模式：消息先进缓冲，等用户停手再统一回复
-        if (settings.waifuMode) {
+        if (isWaifuMode()) {
             if (isGenerating && abortController) {
                 waifu.interrupted = true;
                 abortController.abort();
@@ -1087,7 +1130,7 @@
 
         // 创建AI气泡
         const aiRow = document.createElement('div');
-        aiRow.className = 'msg-row assistant';
+        aiRow.className = 'msg-row assistant pop-in';
         aiRow.innerHTML = getAvatarHTML(aiProfile, 'assistant');
 
         const aiBubble = document.createElement('div');
@@ -1177,16 +1220,10 @@
         const holder = document.createElement('div');
         holder.className = 'msg-row assistant';
         holder.innerHTML = getAvatarHTML(aiProfile, 'assistant');
-        const col = document.createElement('div');
-        col.className = 'bubble-col';
-        const bubble = document.createElement('div');
-        bubble.className = `bubble ${settings.bubbleStyle} assistant`;
-        const content = document.createElement('div');
-        content.className = 'bubble-content';
-        content.innerHTML = '<div class="image-loading"><span class="dot-pulse"></span>正在生成图片…</div>';
-        bubble.appendChild(content);
-        col.appendChild(bubble);
-        holder.appendChild(col);
+        const wrap = document.createElement('div');
+        wrap.className = 'image-msg';
+        wrap.innerHTML = '<div class="image-loading"><span class="dot-pulse"></span>正在生成图片…</div>';
+        holder.appendChild(wrap);
         messagesContainer.appendChild(holder);
         scrollToBottom(true);
 
@@ -1200,14 +1237,13 @@
                 stored = false;
                 console.warn('图片入库失败，改为内联保存', e);
             }
-            content.innerHTML = '';
+            wrap.innerHTML = '';
             const img = document.createElement('img');
-            img.className = 'msg-image';
             img.src = src;
-            img.alt = '生成的图片';
+            img.alt = '图片';
             img.dataset.imgId = imageId;
             img.addEventListener('click', () => openImageViewer(src));
-            content.appendChild(img);
+            wrap.appendChild(img);
             getMessages().push({
                 role: 'assistant', type: 'image', imageId, prompt: promptText,
                 imageInline: stored ? '' : src,
@@ -1217,7 +1253,7 @@
             updateStats();
             scrollToBottom();
         } catch (e) {
-            content.innerHTML = `<div style="color:var(--danger);font-size:14px;">\u26a0\ufe0f ${escapeHTML(e.message || '生图失败')}</div>`;
+            wrap.innerHTML = `<div style="color:var(--danger);font-size:14px;">\u26a0\ufe0f ${escapeHTML(e.message || '生图失败')}</div>`;
             console.error('生图失败', e);
         }
     }
@@ -1244,9 +1280,9 @@
         waifu.timer = setTimeout(() => { waifu.timer = null; runWaifuTurn(); }, settings.waifuMergeDelay || 1600);
     }
 
-    function createBubbleRow() {
+    function createBubbleRow(animate = false) {
         const row = document.createElement('div');
-        row.className = 'msg-row assistant';
+        row.className = 'msg-row assistant' + (animate ? ' pop-in' : '');
         row.innerHTML = getAvatarHTML(aiProfile, 'assistant');
         const col = document.createElement('div');
         col.className = 'bubble-col';
@@ -1299,6 +1335,10 @@
             if (finalText) {
                 content.innerHTML = renderMarkdown(finalText);
                 highlightCode(content);
+                // 文字就位后再播弹出动画，避免"空泡先出现"
+                row.classList.remove('pop-in');
+                void row.offsetWidth;
+                row.classList.add('pop-in');
                 getMessages().push({ role: 'assistant', content: finalText, timestamp: Date.now(), id: uid() });
                 emitted++;
             } else {
@@ -1324,7 +1364,7 @@
     }
 
     async function runWaifuTurn() {
-        if (!settings.waifuMode) return;
+        if (!isWaifuMode()) return;
         if (isGenerating) {
             // 上一轮还在收尾，稍后重试，避免"打断后就不再回复"
             scheduleWaifuReply();
@@ -1387,7 +1427,7 @@
 
     // ========== 输入状态管理 ==========
     function updateInputState() {
-        const wf = !!settings.waifuMode;
+        const wf = isWaifuMode();
         // Waifu 模式下生成中也能继续发消息（用于打断并重新并入）
         if (isGenerating && !wf) {
             sendBtn.style.display = 'none';
@@ -1406,7 +1446,7 @@
 
     function updateSendButtonState() {
         const hasContent = chatInput.value.trim().length > 0;
-        sendBtn.disabled = !hasContent || (isGenerating && !settings.waifuMode);
+        sendBtn.disabled = !hasContent || (isGenerating && !isWaifuMode());
     }
 
     // ========== 消息编辑 ==========
@@ -1760,6 +1800,7 @@ ${chunkText}
         const id = uid();
         conversations[id] = {
             id, title: title || '新对话', titleLocked: false,
+            mode: settings.defaultMode || 'normal',
             messages: [], summary: '',
             createdAt: Date.now(), updatedAt: Date.now(),
         };
@@ -1786,6 +1827,7 @@ ${chunkText}
         rebuildMessagesUI();
         renderChatList();
         updateChatTitle();
+        applyMode();
         closeSidebar();
     }
 
@@ -1807,11 +1849,21 @@ ${chunkText}
         showToast('对话已删除', 'info', 1500);
     }
 
-    function clearCurrentConversation() {
+    async function clearCurrentConversation() {
         if (isGenerating) return;
-        if (!confirm('清空当前对话和摘要？')) return;
+        if (!confirm('清空当前对话？其中的图片也会一并删除。')) return;
         const conv = currentConv();
-        if (conv) { conv.messages = []; conv.summary = ''; }
+        if (conv) {
+            const ids = (conv.messages || [])
+                .filter(m => m.type === 'image' && m.imageId)
+                .map(m => m.imageId);
+            for (const id of ids) {
+                try { await imgDel(id); } catch (e) { console.warn('删除图片失败', e); }
+            }
+            conv.messages = [];
+            conv.summary = '';
+            conv.compressedCount = 0;
+        }
         clearMessagesUI();
         saveAll();
         updateContextUsage();
@@ -2066,7 +2118,7 @@ ${chunkText}
                 saveAll();
                 renderProviderList();
                 renderProviderSelects();
-                updateContextUsage();
+                refreshCtxInputs();
                 showToast(`已切换到「${p.name}」`, 'success', 1500);
             });
             box.appendChild(el);
@@ -2218,6 +2270,23 @@ ${chunkText}
         }
     }
 
+    // 上下文输入框跟随当前接口（免费接口只读）
+    function refreshCtxInputs() {
+        const cp = currentProvider();
+        const nameEl = $('#ctx-provider-name');
+        if (nameEl) nameEl.textContent = `当前：${cp.name}`;
+        const maxInput = $('#set-maxlen');
+        const warnInput = $('#set-warn');
+        if (maxInput) {
+            maxInput.value = providerMaxChars();
+            maxInput.readOnly = cp.type === 'free';
+            maxInput.style.opacity = cp.type === 'free' ? '0.55' : '1';
+            maxInput.title = cp.type === 'free' ? '免费接口受 256KB 请求体限制，固定 80000 字符' : '';
+        }
+        if (warnInput) warnInput.value = providerWarnPercent();
+        updateContextUsage();
+    }
+
     function openSettings() {
         ensureProviders();
         settingsOverlay.classList.add('active');
@@ -2230,27 +2299,21 @@ ${chunkText}
         $('#set-aiavatar').value = aiProfile.avatar;
         $('#set-bgurl').value = settings.backgroundImage;
         $('#set-blur').value = settings.backgroundBlur;
-        $('#set-opacity').value = settings.backgroundOpacity;
-        $('#set-maxlen').value = providerMaxChars();
-        $('#set-warn').value = providerWarnPercent();
-        const cpName = $('#ctx-provider-name');
-        const cp = currentProvider();
-        if (cpName) cpName.textContent = `(当前：${cp.name})`;
-        const maxInput = $('#set-maxlen');
-        if (maxInput) {
-            maxInput.readOnly = cp.type === 'free';
-            maxInput.style.opacity = cp.type === 'free' ? '0.6' : '1';
-            maxInput.title = cp.type === 'free' ? '免费接口受 256KB 请求体限制，固定 80000 字符' : '';
-        }
+        $('#set-brightness').value = settings.backgroundBrightness;
+        refreshCtxInputs();
         $('#set-rounds').value = settings.recentRounds;
         $('#set-autocompact').checked = !!settings.autoCompact;
-        $('#set-waifu').checked = !!settings.waifuMode;
+        $('#set-waifu').checked = isWaifuMode();
+        $('#set-imagegen').checked = !!settings.imageGenEnabled;
         $('#set-selfportrait').value = settings.selfPortrait || '';
         $('#set-systemprompt').value = settings.systemPrompt || '';
+        $('#prompt-waifu').value = getPrompt('waifu');
+        $('#prompt-image').value = getPrompt('image');
+        $('#prompt-summary').value = getPrompt('summary');
         const spStatus = $('#systemprompt-status');
         if (spStatus) spStatus.textContent = '';
         $('#blur-val').textContent = settings.backgroundBlur;
-        $('#opacity-val').textContent = Math.round(settings.backgroundOpacity * 100);
+        $('#brightness-val').textContent = settings.backgroundBrightness;
         $('#provider-editor').hidden = true;
         $('#imageprovider-editor').hidden = true;
 
@@ -2261,13 +2324,26 @@ ${chunkText}
         updateContextUsage();
     }
 
+    // 把界面上的提示词写回 settings（和默认值相同就存空，跟随默认演进）
+    function savePromptsFromUI() {
+        settings.prompts = settings.prompts || {};
+        ['waifu', 'image', 'summary'].forEach(k => {
+            const el = $('#prompt-' + k);
+            if (!el) return;
+            const v = el.value.trim();
+            settings.prompts[k] = (v && v !== PROMPT_DEFAULTS[k]) ? v : '';
+        });
+    }
+
     function closeSettings() {
         settings.colorScheme = $('#set-theme').value;
         settings.bubbleStyle = $('#set-bubble').value;
         settings.showTimestamp = $('#set-timestamp').checked;
         settings.backgroundImage = $('#set-bgurl').value.trim();
         settings.backgroundBlur = parseFloat($('#set-blur').value) || 0;
-        settings.backgroundOpacity = parseFloat($('#set-opacity').value) || 0.75;
+        settings.backgroundBrightness = Math.min(150, Math.max(30, parseInt($('#set-brightness').value, 10) || 100));
+        settings.imageGenEnabled = $('#set-imagegen').checked;
+        savePromptsFromUI();
         const cp = currentProvider();
         const wantMax = parseInt($('#set-maxlen').value, 10) || 80000;
         cp.maxChars = cp.type === 'free' ? 80000 : Math.min(1000000, Math.max(4000, wantMax));
@@ -2276,7 +2352,7 @@ ${chunkText}
         settings.warnThreshold = Math.round(cp.maxChars * cp.warnPercent / 100);
         settings.recentRounds = Math.min(50, Math.max(1, parseInt($('#set-rounds').value, 10) || 10));
         settings.autoCompact = $('#set-autocompact').checked;
-        settings.waifuMode = $('#set-waifu').checked;
+        applyWaifuFlag($('#set-waifu').checked);
         settings.selfPortrait = ($('#set-selfportrait').value || '').trim();
         settings.systemPrompt = ($('#set-systemprompt').value || '').trim();
         userProfile.avatar = $('#set-useravatar').value.trim();
@@ -2346,7 +2422,7 @@ ${chunkText}
 
     // ========== 模式切换 ==========
     function applyMode() {
-        const wf = !!settings.waifuMode;
+        const wf = isWaifuMode();
         const label = $('#mode-label');
         if (label) label.textContent = wf ? 'WA' : 'AI';
         const btn = $('#mode-btn');
@@ -2356,16 +2432,27 @@ ${chunkText}
         updateInputState();
     }
 
-    function toggleMode() {
-        settings.waifuMode = !settings.waifuMode;
-        if (!settings.waifuMode) {
+    // 把模式写进当前对话（同时记住作为下一个新对话的默认）
+    function applyWaifuFlag(on) {
+        const conv = currentConv();
+        if (conv) conv.mode = on ? 'waifu' : 'normal';
+        settings.defaultMode = on ? 'waifu' : 'normal';
+        if (!on) {
             clearTimeout(waifu.timer);
             waifu.timer = null;
             waifu.remainder = '';
         }
         applyMode();
         saveAll();
-        showToast(settings.waifuMode ? '已切换到 Waifu 模式' : '已切换到普通模式', 'info', 1600);
+    }
+
+    function toggleMode() {
+        const next = !isWaifuMode();
+        clearTimeout(waifu.timer);
+        waifu.timer = null;
+        if (isGenerating && abortController) abortController.abort();
+        applyWaifuFlag(next);
+        showToast(next ? '已切换到 Waifu 模式（本对话）' : '已切换到普通模式（本对话）', 'info', 1600);
     }
 
     // ========== 全量导入导出 ==========
@@ -2451,8 +2538,9 @@ ${chunkText}
 
         if (settings.backgroundImage) {
             bgLayer.style.backgroundImage = `url("${settings.backgroundImage}")`;
-            bgLayer.style.filter = `blur(${settings.backgroundBlur}px)`;
-            bgLayer.style.webkitFilter = `blur(${settings.backgroundBlur}px)`;
+            const bright = Math.min(150, Math.max(30, settings.backgroundBrightness || 100));
+            bgLayer.style.filter = `blur(${settings.backgroundBlur}px) brightness(${bright}%)`;
+            bgLayer.style.webkitFilter = `blur(${settings.backgroundBlur}px) brightness(${bright}%)`;
             bgLayer.style.display = 'block';
         } else {
             bgLayer.style.backgroundImage = 'none';
@@ -2461,8 +2549,10 @@ ${chunkText}
 
         const isDark = settings.colorScheme === 'dark' ||
             (settings.colorScheme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        const alpha = 1 - settings.backgroundOpacity;
-        bgMask.style.background = `rgba(${isDark ? '26,26,30' : '248,247,244'},${settings.backgroundImage ? alpha : 1})`;
+        // 固定一层很淡的底色保证文字可读，不再用它控制"透明度"
+        bgMask.style.background = settings.backgroundImage
+            ? `rgba(${isDark ? '20,20,24' : '250,249,246'},${isDark ? 0.18 : 0.10})`
+            : `rgba(${isDark ? '26,26,30' : '248,247,244'},1)`;
     }
 
     function toggleFullscreen() {
@@ -2612,7 +2702,7 @@ ${chunkText}
         // 模式切换
         $('#mode-btn').addEventListener('click', toggleMode);
         $('#set-waifu').addEventListener('change', () => {
-            settings.waifuMode = $('#set-waifu').checked;
+            applyWaifuFlag($('#set-waifu').checked);
             applyMode();
             saveAll();
         });
@@ -2622,7 +2712,7 @@ ${chunkText}
             settings.chatProviderId = e.target.value;
             saveAll();
             renderProviderList();
-            updateContextUsage();
+            refreshCtxInputs();
             showToast('已切换聊天接口', 'success', 1500);
         });
         $('#provider-add').addEventListener('click', () => openProviderEditor(null));
@@ -2642,6 +2732,26 @@ ${chunkText}
         $('#set-selfportrait').addEventListener('change', () => {
             settings.selfPortrait = ($('#set-selfportrait').value || '').trim();
             saveAll();
+        });
+
+        // 生图开关
+        $('#set-imagegen').addEventListener('change', () => {
+            settings.imageGenEnabled = $('#set-imagegen').checked;
+            saveAll();
+        });
+
+        // 提示词恢复默认
+        document.querySelectorAll('[data-reset]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const k = btn.dataset.reset;
+                const el = $('#prompt-' + k);
+                if (el) el.value = PROMPT_DEFAULTS[k];
+                settings.prompts = settings.prompts || {};
+                settings.prompts[k] = '';
+                saveAll();
+                showToast('已恢复默认', 'info', 1400);
+            });
         });
 
         // 图片管理
@@ -2708,9 +2818,9 @@ ${chunkText}
             settings.backgroundBlur = parseFloat(e.target.value);
             applyBackground();
         });
-        $('#set-opacity').addEventListener('input', (e) => {
-            $('#opacity-val').textContent = Math.round(e.target.value * 100);
-            settings.backgroundOpacity = parseFloat(e.target.value);
+        $('#set-brightness').addEventListener('input', (e) => {
+            $('#brightness-val').textContent = e.target.value;
+            settings.backgroundBrightness = parseInt(e.target.value, 10) || 100;
             applyBackground();
         });
         $('#set-bgurl').addEventListener('input', (e) => {
@@ -2912,9 +3022,7 @@ ${chunkText}
         if (!settings._defaultsV3) {
             if (!settings.backgroundImage) settings.backgroundImage = 'https://t.alcy.cc/ycy';
             if (!settings.backgroundBlur) settings.backgroundBlur = 0;
-            if (settings.backgroundOpacity === undefined || Math.abs(settings.backgroundOpacity - 0.85) < 0.001) {
-                settings.backgroundOpacity = 0.75;
-            }
+            if (settings.backgroundBrightness === undefined) settings.backgroundBrightness = 100;
             settings._defaultsV3 = true;
         }
         ensureProviders();
