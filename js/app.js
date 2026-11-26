@@ -984,6 +984,8 @@
         const root = document.documentElement;
         const applyHeight = () => {
             const vv = window.visualViewport;
+            // 用户手动缩放（pinch zoom）时 vv.height 会变小，此时不要干预布局
+            if (vv && vv.scale > 1.05) return;
             const h = vv ? vv.height : window.innerHeight;
             if (h > 0) root.style.setProperty('--app-height', Math.round(h) + 'px');
         };
@@ -1541,10 +1543,20 @@ ${chunkText}
             updateSendButtonState();
         });
         chatInput.addEventListener('keydown', (e) => {
+            // 输入法组合输入中按回车是确认候选词，不能当成发送
+            if (e.isComposing) return;
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
             }
+        });
+
+        // 移动端聚焦输入框：等键盘动画结束后重算视口，并把输入框拉到可见处
+        chatInput.addEventListener('focus', () => {
+            setTimeout(() => {
+                window.dispatchEvent(new Event('resize'));
+                chatInput.scrollIntoView({ block: 'nearest' });
+            }, 280);
         });
 
         // 粘贴图片提示
