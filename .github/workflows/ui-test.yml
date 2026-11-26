@@ -35,6 +35,13 @@ jobs:
       - name: Run UI tests
         run: node .github/ui-test.mjs
 
+      - name: Install Pillow
+        run: python3 -m pip install --quiet pillow
+
+      - name: Flicker check (screencast)
+        continue-on-error: true
+        run: node .github/flicker-test.mjs
+
       - name: Also test deployed site
         if: always()
         continue-on-error: true
@@ -53,4 +60,6 @@ jobs:
           path: |
             ui-out/**
             ui-out-live/**
+            flicker-out/**
+            flicker-out-live/**
           retention-days: 7
