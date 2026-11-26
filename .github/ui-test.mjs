@@ -254,6 +254,14 @@ ok('刷新后对话仍在列表', convStillExists >= 1, `count=${convStillExists
 await page.screenshot({ path: path.join(OUT, '09-after-reload.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 7. 液态玻璃 & 合成层质量 ----------
+// 先切到毛玻璃预设（默认为"现代简约"，不含模糊）
+await page.click('#settings-top-btn');
+await page.waitForTimeout(500);
+await page.selectOption('#set-bubble', 'ios');
+await page.waitForTimeout(200);
+await page.click('#close-settings');
+await page.waitForTimeout(600);
+
 for (let i = 0; i < 4; i++) {
     const label = String(await page.textContent('#mode-label') || '').trim();
     if (label === 'AI') break;
@@ -300,6 +308,21 @@ ok('输入框是毛玻璃', /blur\(/.test(glass.input) && /saturate/.test(glass.
 ok('输入框有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
 ok('输入框圆角足够大', parseFloat(glass.inputRadius) >= 24, glass.inputRadius);
 ok('胶囊条是毛玻璃', /blur\(/.test(glass.pill), glass.pill);
+
+// 水玻璃预设
+await page.click('#settings-top-btn');
+await page.waitForTimeout(500);
+await page.selectOption('#set-bubble', 'water');
+await page.waitForTimeout(200);
+await page.click('#close-settings');
+await page.waitForTimeout(700);
+await page.screenshot({ path: path.join(OUT, '10b-glass-water.jpg'), type: 'jpeg', quality: 72 });
+const water = await page.evaluate(() => {
+    const b = [...document.querySelectorAll('.bubble.in-view')].find(x => x.classList.contains('water'));
+    if (!b) return { found: false, cf: '' };
+    return { found: true, cf: getComputedStyle(b).backdropFilter };
+});
+ok('水玻璃气泡有强模糊与高饱和', water.found && /blur\(3[0-9]px\)/.test(water.cf) && /saturate\(2[0-9][0-9]%\)/.test(water.cf), water.cf);
 
 // 侧栏
 await page.click('#menu-btn');
