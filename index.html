@@ -13,20 +13,16 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
 </head>
 <body>
-    <!-- 背景装饰 -->
     <div id="bg-layer"></div>
     <div id="bg-mask"></div>
     <div id="grain-overlay"></div>
 
-    <!-- 网络状态提示 -->
     <div id="network-status" class="network-status">
         <span class="network-icon">&#9888;</span>
         <span class="network-text">网络连接已断开</span>
     </div>
 
-    <!-- 主容器 -->
     <div id="app">
-        <!-- 侧边栏 -->
         <aside id="sidebar" role="navigation" aria-label="对话列表">
             <div class="sidebar-header">
                 <div class="logo">
@@ -38,7 +34,6 @@
                 </button>
             </div>
 
-            <!-- 搜索框 -->
             <div class="sidebar-search">
                 <div class="search-wrapper">
                     <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -48,7 +43,6 @@
 
             <div id="chat-list" class="chat-list" role="list"></div>
 
-            <!-- 对话统计 -->
             <div class="sidebar-stats">
                 <span id="stats-conv-count">0 个对话</span>
                 <span class="stats-divider">|</span>
@@ -62,20 +56,19 @@
             </div>
         </aside>
 
-        <!-- 侧边栏遮罩（移动端） -->
         <div id="sidebar-overlay"></div>
 
-        <!-- 主聊天区 -->
         <main id="chat-main">
-            <!-- 顶栏 -->
+            <!-- 顶栏：左侧小胶囊只包汉堡，标题居中，右侧功能胶囊 -->
             <header id="top-bar">
                 <div class="bar-pill bar-pill-left">
                     <button id="menu-btn" class="bar-btn" title="菜单" aria-label="打开菜单">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                     </button>
-                    <div id="chat-title" class="chat-title">新对话</div>
                 </div>
+                <div id="chat-title" class="chat-title">新对话</div>
                 <div class="bar-pill bar-pill-right">
+                    <button id="mode-btn" class="bar-btn mode-btn" title="切换对话模式" aria-label="切换对话模式"><span id="mode-label">AI</span></button>
                     <button id="search-msg-btn" class="bar-btn" title="搜索消息 (Ctrl+F)" aria-label="搜索消息">
                         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                     </button>
@@ -91,7 +84,6 @@
                 </div>
             </header>
 
-            <!-- 消息搜索栏 -->
             <div id="msg-search-bar" class="msg-search-bar">
                 <div class="msg-search-inner">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -111,7 +103,6 @@
                 </div>
             </div>
 
-            <!-- 消息区 -->
             <div id="messages" class="messages-container" role="log" aria-live="polite">
                 <div id="welcome-screen" class="welcome-screen">
                     <div class="welcome-logo">
@@ -122,12 +113,10 @@
                 </div>
             </div>
 
-            <!-- 滚动到底部按钮 -->
             <button id="scroll-bottom-btn" class="scroll-bottom-btn" title="回到底部" aria-label="回到底部">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
 
-            <!-- 输入区 -->
             <div id="input-area" class="input-area">
                 <div class="input-wrapper" id="input-wrapper">
                     <textarea id="chat-input" placeholder="输入消息..." rows="1" aria-label="消息输入框"></textarea>
@@ -142,13 +131,12 @@
                     </div>
                 </div>
                 <div class="input-footer">
-                    <span class="input-hint">Enter 发送 / Shift+Enter 换行</span>
+                    <span class="input-hint" id="input-hint">Enter 发送 / Shift+Enter 换行</span>
                 </div>
             </div>
         </main>
     </div>
 
-    <!-- 右键菜单 -->
     <div id="context-menu" class="context-menu" role="menu">
         <div class="ctx-item" data-action="copy" role="menuitem">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -169,7 +157,6 @@
         </div>
     </div>
 
-    <!-- 编辑消息对话框 -->
     <div id="edit-overlay" class="settings-overlay"></div>
     <div id="edit-panel" class="edit-panel" role="dialog" aria-label="编辑消息">
         <div class="edit-header">
@@ -197,6 +184,103 @@
             </button>
         </div>
         <div class="settings-body">
+
+            <!-- 聊天服务 -->
+            <div class="settings-section">
+                <div class="section-title">聊天服务</div>
+                <div class="setting-item">
+                    <label>当前使用</label>
+                    <select id="set-provider"></select>
+                </div>
+                <div id="provider-list" class="provider-list"></div>
+                <div class="provider-actions">
+                    <button id="provider-add" class="btn-small">＋ 添加 OpenAI 兼容接口</button>
+                </div>
+                <div id="provider-editor" class="provider-editor" hidden>
+                    <input type="text" id="pe-name" placeholder="名称，例如 DeepSeek">
+                    <input type="text" id="pe-url" placeholder="Base URL，例如 https://api.deepseek.com/v1">
+                    <input type="password" id="pe-key" placeholder="API Key">
+                    <input type="text" id="pe-model" placeholder="模型名，例如 deepseek-chat">
+                    <div class="editor-actions">
+                        <button id="pe-save" class="btn-small primary">保存</button>
+                        <button id="pe-cancel" class="btn-small">取消</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 生图服务 -->
+            <div class="settings-section">
+                <div class="section-title">生图服务</div>
+                <div class="setting-item">
+                    <label>当前使用</label>
+                    <select id="set-imageprovider"></select>
+                </div>
+                <div id="imageprovider-list" class="provider-list"></div>
+                <div class="provider-actions">
+                    <button id="imageprovider-add" class="btn-small">＋ 添加生图接口</button>
+                </div>
+                <div id="imageprovider-editor" class="provider-editor" hidden>
+                    <input type="text" id="ipe-name" placeholder="名称">
+                    <input type="text" id="ipe-url" placeholder="Base URL，例如 https://ai.gitee.com/v1">
+                    <input type="password" id="ipe-key" placeholder="API Key">
+                    <input type="text" id="ipe-model" placeholder="模型名，例如 z-image-turbo">
+                    <input type="text" id="ipe-size" placeholder="尺寸，例如 1024x1024">
+                    <div class="editor-actions">
+                        <button id="ipe-save" class="btn-small primary">保存</button>
+                        <button id="ipe-cancel" class="btn-small">取消</button>
+                    </div>
+                </div>
+                <div class="setting-item">
+                    <label>AI 自画像描述 <span class="hint-text">(生图时描述"你"长什么样，可留空)</span></label>
+                    <textarea id="set-selfportrait" rows="3" placeholder="例如：a 20-year-old Chinese girl with long black hair, wearing a white hoodie..."></textarea>
+                </div>
+            </div>
+
+            <!-- 系统提示词 -->
+            <div class="settings-section">
+                <div class="section-title">系统提示词</div>
+                <div class="setting-item">
+                    <label>全局角色设定 <span class="hint-text">(压缩时不会被归纳)</span></label>
+                    <textarea id="set-systemprompt" rows="5" placeholder="例如：你是一位严谨的中文写作助手，回答简洁，不使用表情符号。"></textarea>
+                    <div class="system-prompt-actions">
+                        <button id="save-systemprompt" class="btn-small">保存</button>
+                        <button id="clear-systemprompt" class="btn-small">清空</button>
+                        <span id="systemprompt-status" class="hint-text"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 上下文 -->
+            <div class="settings-section">
+                <div class="section-title">上下文与模式</div>
+                <div class="setting-item">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="set-waifu">
+                        <span>Waifu 模式（多条消息 / 可连发 / 逐条弹出）</span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label>上下文上限 <span class="hint-text">(字符，接口硬上限约 8.4 万)</span></label>
+                    <input type="number" id="set-maxlen" min="5000" max="84000" step="1000" value="80000">
+                </div>
+                <div class="setting-item">
+                    <label>提醒阈值 <span class="hint-text">(字符)</span></label>
+                    <input type="number" id="set-warn" min="1000" max="84000" step="1000" value="56000">
+                </div>
+                <div class="setting-item">
+                    <label>保留最近轮数 <span class="hint-text">(不参与压缩)</span></label>
+                    <input type="number" id="set-rounds" min="1" max="50" value="10">
+                </div>
+                <div class="setting-item">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="set-autocompact" checked>
+                        <span>达到上限时自动压缩旧消息</span>
+                    </label>
+                </div>
+                <div id="context-usage" class="context-usage">上下文用量：--</div>
+            </div>
+
+            <!-- 外观 -->
             <div class="settings-section">
                 <div class="section-title">外观</div>
                 <div class="setting-item">
@@ -219,10 +303,12 @@
                 <div class="setting-item">
                     <label class="checkbox-label">
                         <input type="checkbox" id="set-timestamp">
-                        <span>显示消息时间戳</span>
+                        <span>显示消息时间戳（气泡下方）</span>
                     </label>
                 </div>
             </div>
+
+            <!-- 头像 -->
             <div class="settings-section">
                 <div class="section-title">头像</div>
                 <div class="setting-item">
@@ -238,6 +324,8 @@
                     <button id="clear-aiavatar" class="btn-small">清除头像</button>
                 </div>
             </div>
+
+            <!-- 背景 -->
             <div class="settings-section">
                 <div class="section-title">背景</div>
                 <div class="setting-item">
@@ -251,69 +339,54 @@
                     <input type="range" id="set-blur" min="0" max="15" step="0.5" value="0">
                 </div>
                 <div class="setting-item">
-                    <label>遮罩透明度 <span id="opacity-val">85</span>%</label>
-                    <input type="range" id="set-opacity" min="0.1" max="1" step="0.05" value="0.85">
+                    <label>遮罩透明度 <span id="opacity-val">75</span>%</label>
+                    <input type="range" id="set-opacity" min="0.1" max="1" step="0.05" value="0.75">
                 </div>
             </div>
+
+            <!-- 图片管理 -->
             <div class="settings-section">
-                <div class="section-title">系统提示词</div>
+                <div class="section-title">图片管理</div>
                 <div class="setting-item">
-                    <label>角色设定 <span class="hint-text">(全局生效，压缩时不会被归纳)</span></label>
-                    <textarea id="set-systemprompt" rows="5" placeholder="例如：你是一位严谨的中文写作助手，回答简洁，不使用表情符号。"></textarea>
-                    <div class="system-prompt-actions">
-                        <button id="save-systemprompt" class="btn-small">保存</button>
-                        <button id="clear-systemprompt" class="btn-small">清空</button>
-                        <span id="systemprompt-status" class="hint-text"></span>
+                    <div class="image-manager-head">
+                        <span id="image-count" class="hint-text">共 0 张</span>
+                        <button id="clear-images" class="btn-small danger">清空全部</button>
                     </div>
+                    <div id="image-gallery" class="image-gallery"></div>
                 </div>
             </div>
-            <div class="settings-section">
-                <div class="section-title">上下文</div>
-                <div class="setting-item">
-                    <label>上下文上限 <span class="hint-text">(字符，接口硬上限约 8.4 万)</span></label>
-                    <input type="number" id="set-maxlen" min="5000" max="84000" step="1000" value="80000">
-                </div>
-                <div class="setting-item">
-                    <label>提醒阈值 <span class="hint-text">(字符)</span></label>
-                    <input type="number" id="set-warn" min="1000" max="84000" step="1000" value="56000">
-                </div>
-                <div class="setting-item">
-                    <label>保留最近轮数 <span class="hint-text">(不参与压缩)</span></label>
-                    <input type="number" id="set-rounds" min="1" max="50" value="10">
-                </div>
-                <div class="setting-item">
-                    <label class="checkbox-label">
-                        <input type="checkbox" id="set-autocompact" checked>
-                        <span>达到上限时自动压缩旧消息</span>
-                    </label>
-                </div>
-                <div id="context-usage" class="context-usage">上下文用量：--</div>
-            </div>
+
+            <!-- 数据 -->
             <div class="settings-section">
                 <div class="section-title">数据</div>
                 <button id="export-btn" class="btn-action btn-secondary">导出当前对话</button>
+                <button id="export-all" class="btn-action btn-secondary">导出全部数据（对话 + 设置 + 图片）</button>
+                <button id="import-all" class="btn-action btn-secondary">导入备份文件</button>
+                <input type="file" id="import-file" accept=".json,application/json" class="file-input">
                 <button id="clear-conv" class="btn-action btn-danger">清空当前对话</button>
                 <button id="clear-all" class="btn-action btn-danger">清空所有数据</button>
             </div>
         </div>
     </div>
 
-    <!-- 重命名对话框 -->
+    <!-- 对话设置（名称 + 独立系统提示词） -->
     <div id="rename-overlay" class="settings-overlay"></div>
-    <div id="rename-panel" class="rename-panel" role="dialog" aria-label="重命名对话">
+    <div id="rename-panel" class="rename-panel" role="dialog" aria-label="对话设置">
         <div class="rename-header">
-            <h3>重命名对话</h3>
+            <h3>对话设置</h3>
         </div>
         <div class="rename-body">
+            <label class="field-label">对话名称</label>
             <input type="text" id="rename-input" placeholder="输入新名称..." maxlength="50" aria-label="对话名称">
+            <label class="field-label">本对话专属提示词 <span class="hint-text">(留空则使用全局)</span></label>
+            <textarea id="rename-systemprompt" rows="4" placeholder="只在这个对话里生效，会覆盖全局系统提示词"></textarea>
             <div class="rename-actions">
                 <button id="rename-cancel" class="btn-action btn-secondary">取消</button>
-                <button id="rename-confirm" class="btn-action btn-primary">确认</button>
+                <button id="rename-confirm" class="btn-action btn-primary">保存</button>
             </div>
         </div>
     </div>
 
-    <!-- Toast 通知 -->
     <div id="toast-container" class="toast-container"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
