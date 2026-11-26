@@ -13,7 +13,10 @@
     const API_MAX_BYTES = 262144; // 接口请求体硬上限 256KB
     const MAX_PROMPT_CHARS = 80000; // 中文按 3 字节/字折算，留出 JSON 转义余量
     const SUMMARY_CHUNK_CHARS = 18000; // 单次总结的分块大小
-    const STORAGE_KEY = 'aichat_v2';
+    const STORAGE_KEY = 'aichat_v2';           // 旧版键（仅用于迁移）
+    const META_KEY = 'aichat_meta_v3';         // 设置/档案/当前对话
+    const CONV_DB = 'aichat_data';             // 对话与图片都放 IndexedDB
+    const CONV_STORE = 'conversations';
     const DOM_CLEANUP_THRESHOLD = 200; // 消息数量阈值，超过后清理旧DOM
     const RAF_THROTTLE_MS = 32; // ~30fps 流式渲染节流
 
@@ -183,39 +186,160 @@
     }
 
     // ========== 存储 ==========
-    function saveAll() {
-        const data = { conversations, activeConvId, settings, userProfile, aiProfile };
+    // 对话存 IndexedDB（不受 localStorage 5MB 限制），设置与当前会话存 localStorage。
+    // 绝不因为"空间不足"删除用户的对话。
+    let _convDb = null;
+    let _convSaveTimer = null;
+    let _convDirty = false;
+
+    function convDb() {
+        if (_convDb) return Promise.resolve(_convDb);
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(CONV_DB, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(CONV_STORE)) db.createObjectStore(CONV_STORE, { keyPath: 'id' });
+                if (!db.objectStoreNames.contains(IMG_STORE)) db.createObjectStore(IMG_STORE, { keyPath: 'id' });
+            };
+            req.onsuccess = () => { _convDb = req.result; resolve(_convDb); };
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    function convTx(mode, fn) {
+        return convDb().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(CONV_STORE, mode);
+            const r = fn(tx.objectStore(CONV_STORE));
+            tx.oncomplete = () => resolve(r && ('result' in r) ? r.result : undefined);
+            tx.onerror = () => reject(tx.error);
+        }));
+    }
+
+    const convAll = () => convTx('readonly', st => st.getAll());
+    const convPut = (c) => convTx('readwrite', st => st.put(c));
+    const convDel = (id) => convTx('readwrite', st => st.delete(id));
+
+    function saveMeta() {
+        const meta = { settings, userProfile, aiProfile, activeConvId, savedAt: Date.now() };
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            localStorage.setItem(META_KEY, JSON.stringify(meta));
         } catch (e) {
-            // 空间不足：砍掉较旧的一半对话后再写一次（不递归调用，避免死循环）
-            const keys = Object.keys(conversations).sort((a, b) => conversations[b].updatedAt - conversations[a].updatedAt);
-            if (keys.length > 3) {
-                for (let i = Math.floor(keys.length / 2); i < keys.length; i++) delete conversations[keys[i]];
-                try {
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-                    showToast('存储空间不足，已自动清理部分旧对话', 'warning');
-                } catch (e2) {
-                    showToast('存储空间不足，保存失败', 'error');
-                }
-            } else {
-                showToast('存储空间不足，保存失败', 'error');
-            }
+            console.error('保存设置失败', e);
+            showToast('设置保存失败：浏览器存储空间不足', 'error', 4000);
         }
     }
 
-    function loadAll() {
+    async function flushConversations() {
+        if (!_convDirty) return;
+        _convDirty = false;
         try {
-            const raw = localStorage.getItem(STORAGE_KEY);
+            const db = await convDb();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(CONV_STORE, 'readwrite');
+                const st = tx.objectStore(CONV_STORE);
+                st.clear();
+                Object.values(conversations).forEach(c => { if (c && c.id) st.put(c); });
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
+        } catch (e) {
+            console.error('保存对话失败', e);
+            showToast('对话保存失败，请及时导出备份', 'error', 4000);
+        }
+    }
+
+    function saveAll() {
+        saveMeta();
+        _convDirty = true;
+        clearTimeout(_convSaveTimer);
+        _convSaveTimer = setTimeout(flushConversations, 250);
+    }
+
+    function saveConversationNow() {
+        _convDirty = true;
+        clearTimeout(_convSaveTimer);
+        return flushConversations();
+    }
+
+    async function loadAll() {
+        // ---- 1. 读取设置与当前会话 ----
+        let hasMeta = false;
+        try {
+            const raw = localStorage.getItem(META_KEY);
             if (raw) {
-                const data = JSON.parse(raw);
-                conversations = data.conversations || {};
-                activeConvId = data.activeConvId || null;
-                settings = { ...settings, ...data.settings };
-                userProfile = { ...userProfile, ...data.userProfile };
-                aiProfile = { ...aiProfile, ...data.aiProfile };
+                const d = JSON.parse(raw);
+                hasMeta = true;
+                if (d.settings && typeof d.settings === 'object') settings = { ...settings, ...d.settings };
+                if (d.userProfile && typeof d.userProfile === 'object') userProfile = { ...userProfile, ...d.userProfile };
+                if (d.aiProfile && typeof d.aiProfile === 'object') aiProfile = { ...aiProfile, ...d.aiProfile };
+                activeConvId = d.activeConvId || null;
             }
-        } catch (e) { console.error('加载配置失败', e); }
+        } catch (e) { console.error('读取设置失败', e); }
+
+        // ---- 2. 从旧版 localStorage 迁移（只做一次） ----
+        try {
+            const oldRaw = localStorage.getItem(STORAGE_KEY);
+            if (oldRaw) {
+                const od = JSON.parse(oldRaw);
+                if (!hasMeta) {
+                    if (od.settings) settings = { ...settings, ...od.settings };
+                    if (od.userProfile) userProfile = { ...userProfile, ...od.userProfile };
+                    if (od.aiProfile) aiProfile = { ...aiProfile, ...od.aiProfile };
+                    if (od.activeConvId) activeConvId = od.activeConvId;
+                }
+                if (od.conversations && typeof od.conversations === 'object') {
+                    for (const id of Object.keys(od.conversations)) {
+                        const c = od.conversations[id];
+                        if (c && c.id && Array.isArray(c.messages)) await convPut(c);
+                    }
+                }
+                localStorage.removeItem(STORAGE_KEY);
+            }
+        } catch (e) { console.error('迁移旧数据失败', e); }
+
+        // ---- 3. 读取对话列表 ----
+        conversations = {};
+        try {
+            const all = await convAll();
+            all.forEach(c => {
+                if (!c || !c.id) return;
+                if (!Array.isArray(c.messages)) c.messages = [];
+                if (typeof c.title !== 'string' || !c.title) c.title = '未命名对话';
+                if (c.summary === undefined) c.summary = '';
+                conversations[c.id] = c;
+            });
+        } catch (e) {
+            console.error('读取对话失败', e);
+            showToast('对话数据读取失败，可能是浏览器禁用了本地存储', 'error', 4000);
+        }
+
+        // ---- 4. 校验当前会话 ----
+        if (!activeConvId || !conversations[activeConvId]) {
+            const keys = Object.keys(conversations).sort((a, b) =>
+                (conversations[b].updatedAt || 0) - (conversations[a].updatedAt || 0));
+            activeConvId = keys.length ? keys[0] : null;
+        }
+    }
+
+    // 图片压缩：避免把几 MB 的 base64 塞进设置里
+    function compressImage(file, maxSide = 1400, quality = 0.82) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                try {
+                    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+                    const cvs = document.createElement('canvas');
+                    cvs.width = Math.max(1, Math.round(img.width * scale));
+                    cvs.height = Math.max(1, Math.round(img.height * scale));
+                    cvs.getContext('2d').drawImage(img, 0, 0, cvs.width, cvs.height);
+                    URL.revokeObjectURL(url);
+                    resolve(cvs.toDataURL('image/jpeg', quality));
+                } catch (e) { URL.revokeObjectURL(url); reject(e); }
+            };
+            img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+            img.src = url;
+        });
     }
 
     // ========== 当前对话 ==========
@@ -246,7 +370,7 @@
 
     // ========== 供应商（聊天 / 生图，可多套并存） ==========
     const DEFAULT_PROVIDERS = [
-        { id: 'free', name: '公益接口（默认）', type: 'free', baseUrl: 'https://free-api.cnmwx.com/v1/completions', apiKey: '', model: '' }
+        { id: 'free', name: '公益接口（默认）', type: 'free', baseUrl: 'https://free-api.cnmwx.com/v1/completions', apiKey: '', model: '', maxChars: 80000, warnPercent: 70 }
     ];
     const DEFAULT_IMAGE_PROVIDERS = [
         { id: 'gitee', name: 'Gitee AI（默认）', baseUrl: 'https://ai.gitee.com/v1', apiKey: '', model: 'z-image-turbo', size: '1024x1024' }
@@ -268,28 +392,34 @@
         return settings.providers.find(x => x.id === settings.chatProviderId) || settings.providers[0];
     }
 
+    // 上下文档位跟着当前聊天接口走：免费接口受 256KB 请求体限制，自定义接口用各自配置
+    function providerMaxChars() {
+        const p = currentProvider();
+        if (p.type === 'free') return 80000;
+        const n = parseInt(p.maxChars, 10);
+        return (n && n >= 4000) ? n : 128000;
+    }
+
+    function providerWarnPercent() {
+        const p = currentProvider();
+        const n = parseInt(p.warnPercent, 10);
+        return (n && n >= 30 && n <= 95) ? n : 70;
+    }
+
+    function providerWarnChars() {
+        return Math.round(providerMaxChars() * providerWarnPercent() / 100);
+    }
+
     function currentImageProvider() {
         ensureProviders();
         return settings.imageProviders.find(x => x.id === settings.imageProviderId) || settings.imageProviders[0] || null;
     }
 
     // ========== 图片存储（IndexedDB，避免撑爆 localStorage） ==========
-    const IMG_DB = 'aichat_media';
+    const IMG_DB = CONV_DB;      // 与对话共用同一个 IndexedDB
     const IMG_STORE = 'images';
-    let _imgDb = null;
 
-    function imgDb() {
-        if (_imgDb) return Promise.resolve(_imgDb);
-        return new Promise((resolve, reject) => {
-            const req = indexedDB.open(IMG_DB, 1);
-            req.onupgradeneeded = () => {
-                const db = req.result;
-                if (!db.objectStoreNames.contains(IMG_STORE)) db.createObjectStore(IMG_STORE, { keyPath: 'id' });
-            };
-            req.onsuccess = () => { _imgDb = req.result; resolve(_imgDb); };
-            req.onerror = () => reject(req.error);
-        });
-    }
+    function imgDb() { return convDb(); }
 
     function idbDo(mode, fn) {
         return imgDb().then(db => new Promise((resolve, reject) => {
@@ -506,9 +636,10 @@
 
     // 兜底：压缩后仍超长时保留头尾、省略中段，避免撞 256KB
     function fitPrompt(prompt) {
-        if (prompt.length <= MAX_PROMPT_CHARS) return prompt;
-        const headLen = Math.floor(MAX_PROMPT_CHARS * 0.34);
-        const tailLen = MAX_PROMPT_CHARS - headLen - 40;
+        const cap = Math.min(providerMaxChars(), Math.floor(API_MAX_BYTES / 3) - 200);
+        if (prompt.length <= cap) return prompt;
+        const headLen = Math.floor(cap * 0.34);
+        const tailLen = cap - headLen - 40;
         return prompt.slice(0, headLen)
             + '\n...[中间内容过长，已省略]...\n'
             + prompt.slice(-tailLen);
@@ -899,7 +1030,8 @@
         renderMessage(userMsgObj, true);
 
         const conv = currentConv();
-        if (conv && getMessages().filter(m => m.role === 'user').length === 1) {
+        const userCount = getMessages().filter(m => m.role === 'user').length;
+        if (conv && !conv.titleLocked && userCount === 1 && (!conv.title || conv.title === '新对话')) {
             conv.title = userMsg.slice(0, 30) + (userMsg.length > 30 ? '...' : '');
             renderChatList();
             updateChatTitle();
@@ -926,8 +1058,9 @@
         if (isGenerating) return;
 
         let prompt = buildPrompt(userMsg);
-        const warnAt = settings.warnThreshold || Math.round(settings.maxPromptLength * 0.7);
-        if (settings.autoCompact && prompt.length > settings.maxPromptLength) {
+        const cap = providerMaxChars();
+        const warnAt = providerWarnChars();
+        if (settings.autoCompact && prompt.length > cap) {
             renderSystemMessage(`\u26a0\ufe0f 上下文已达 ${prompt.length} 字符，正在自动压缩旧消息...`);
             const ok = await compactConversation({ manual: false, silent: false });
             if (ok) prompt = buildPrompt(userMsg);
@@ -1146,10 +1279,20 @@
             const finalText = filterAd(text);
             content.innerHTML = finalText ? renderMarkdown(finalText) : '';
             highlightCode(content);
-            getMessages().push({ role: 'assistant', content: finalText || '（图片）', timestamp: Date.now(), id: uid() });
-            if (prompt) handleGenImage(prompt);
+            if (finalText) {
+                getMessages().push({ role: 'assistant', content: finalText, timestamp: Date.now(), id: uid() });
+            }
             emitted++;
             scrollToBottom();
+
+            // 生图要等它真的出来再继续下一条，否则图片会插到后面消息的下面
+            if (prompt) {
+                await handleGenImage(prompt);
+                if (waifu.interrupted) {
+                    waifu.remainder = parts.slice(i + 1).join(' ');
+                    break;
+                }
+            }
 
             if (i < parts.length - 1) await sleep(240 + Math.random() * 380);
         }
@@ -1159,7 +1302,12 @@
     }
 
     async function runWaifuTurn() {
-        if (!settings.waifuMode || isGenerating) return;
+        if (!settings.waifuMode) return;
+        if (isGenerating) {
+            // 上一轮还在收尾，稍后重试，避免"打断后就不再回复"
+            scheduleWaifuReply();
+            return;
+        }
         const conv = currentConv();
         if (!conv) return;
         const msgs = getMessages();
@@ -1192,8 +1340,8 @@
         } catch (e) {
             typing.row.remove();
             if (e.name === 'AbortError') {
-                // 被打断：把没发出的部分留给下一轮 prompt
-                waifu.remainder = filterAd(fullText);
+                // 被打断：还没发出去的文字留给下一轮 prompt
+                if (!waifu.remainder) waifu.remainder = filterAd(fullText);
             } else {
                 console.error('waifu 生成失败', e);
                 renderSystemMessage('\u26a0\ufe0f ' + (e.message || '请求失败'));
@@ -1221,6 +1369,10 @@
         // Waifu 模式下生成中也能继续发消息（用于打断并重新并入）
         if (isGenerating && !wf) {
             sendBtn.style.display = 'none';
+            stopBtn.style.display = 'flex';
+        } else if (isGenerating && wf) {
+            // waifu 生成中：发送（打断并发送）和停止同时可用
+            sendBtn.style.display = 'flex';
             stopBtn.style.display = 'flex';
         } else {
             sendBtn.style.display = 'flex';
@@ -1584,7 +1736,7 @@ ${chunkText}
     function createConversation(title, focusInput = true) {
         const id = uid();
         conversations[id] = {
-            id, title: title || '新对话',
+            id, title: title || '新对话', titleLocked: false,
             messages: [], summary: '',
             createdAt: Date.now(), updatedAt: Date.now(),
         };
@@ -1600,7 +1752,11 @@ ${chunkText}
     }
 
     function switchConversation(id) {
-        if (isGenerating) return;
+        if (isGenerating) {
+            clearTimeout(waifu.timer);
+            waifu.timer = null;
+            if (abortController) abortController.abort();
+        }
         if (activeConvId === id) { closeSidebar(); return; }
         activeConvId = id;
         saveAll();
@@ -1614,9 +1770,11 @@ ${chunkText}
         if (isGenerating) return;
         if (!confirm('确定删除这个对话吗？')) return;
         delete conversations[id];
+        convDel(id).catch(e => console.error('删除对话失败', e));
         if (activeConvId === id) {
-            const keys = Object.keys(conversations);
-            activeConvId = keys.length > 0 ? keys[keys.length - 1] : null;
+            const keys = Object.keys(conversations).sort((a, b) =>
+                (conversations[b].updatedAt || 0) - (conversations[a].updatedAt || 0));
+            activeConvId = keys.length > 0 ? keys[0] : null;
         }
         saveAll();
         renderChatList();
@@ -1638,12 +1796,18 @@ ${chunkText}
         showToast('对话已清空', 'info', 1500);
     }
 
-    function clearAllData() {
+    async function clearAllData() {
         if (isGenerating) return;
-        if (!confirm('这将清空所有对话和设置，确定吗？')) return;
+        if (!confirm('这将清空所有对话、图片和设置，确定吗？')) return;
         conversations = {};
         activeConvId = null;
+        try {
+            await convTx('readwrite', st => st.clear());
+            await idbDo('readwrite', st => st.clear());
+        } catch (e) { console.error(e); }
+        localStorage.removeItem(META_KEY);
         localStorage.removeItem(STORAGE_KEY);
+        showWelcome();
         renderChatList();
         clearMessagesUI();
         updateChatTitle();
@@ -1730,7 +1894,7 @@ ${chunkText}
         }
 
         const filtered = searchQuery
-            ? keys.filter(id => conversations[id].title.toLowerCase().includes(searchQuery.toLowerCase()))
+            ? keys.filter(id => String(conversations[id].title || '').toLowerCase().includes(searchQuery.toLowerCase()))
             : keys;
 
         if (filtered.length === 0) {
@@ -1757,9 +1921,9 @@ ${chunkText}
             item.setAttribute('role', 'listitem');
 
             // 最后一条消息预览
-            const lastMsg = conv.messages.length > 0
-                ? conv.messages[conv.messages.length - 1].content
-                : '';
+            const lastArr = Array.isArray(conv.messages) ? conv.messages : [];
+            const lastOne = lastArr.length > 0 ? lastArr[lastArr.length - 1] : null;
+            const lastMsg = lastOne ? (lastOne.type === 'image' ? '[图片]' : (lastOne.content || '')) : '';
             const preview = lastMsg.length > 30 ? lastMsg.slice(0, 30) + '...' : lastMsg;
 
             item.innerHTML = `
@@ -1793,11 +1957,13 @@ ${chunkText}
         const prompt = buildPrompt('');
         const len = prompt.length;
         const bytes = utf8Bytes(prompt);
-        const limit = settings.maxPromptLength || MAX_PROMPT_CHARS;
-        const warnAt = settings.warnThreshold || Math.round(limit * 0.7);
+        const limit = providerMaxChars();
+        const warnPct = providerWarnPercent();
         const pct = Math.min(100, Math.round((len / limit) * 100));
-        el.textContent = `上下文：${len} 字符 / ${(bytes / 1024).toFixed(1)} KB（${pct}%；接口硬上限 256 KB ≈ 8.4 万字符）`;
-        el.className = (len > warnAt || pct > 85) ? 'context-usage warning' : 'context-usage';
+        const p = currentProvider();
+        const extra = p.type === 'free' ? '；免费接口请求体硬上限 256 KB' : '';
+        el.textContent = `上下文：${len} 字符 / ${(bytes / 1024).toFixed(1)} KB（${pct}%，上限 ${limit}${extra}）`;
+        el.className = (pct >= warnPct) ? 'context-usage warning' : 'context-usage';
     }
 
     function updateCharCount() {
@@ -1904,7 +2070,7 @@ ${chunkText}
             const p = settings.providers.find(x => x.id === editingProviderId);
             if (p) { p.name = name; p.baseUrl = baseUrl; p.apiKey = apiKey; p.model = model; }
         } else {
-            const np = { id: uid(), name, type: 'openai', baseUrl, apiKey, model };
+            const np = { id: uid(), name, type: 'openai', baseUrl, apiKey, model, maxChars: 128000, warnPercent: 70 };
             settings.providers.push(np);
             settings.chatProviderId = np.id;
         }
@@ -2041,8 +2207,10 @@ ${chunkText}
         $('#set-bgurl').value = settings.backgroundImage;
         $('#set-blur').value = settings.backgroundBlur;
         $('#set-opacity').value = settings.backgroundOpacity;
-        $('#set-maxlen').value = settings.maxPromptLength;
-        $('#set-warn').value = settings.warnThreshold;
+        $('#set-maxlen').value = providerMaxChars();
+        $('#set-warn').value = providerWarnPercent();
+        const cpName = $('#ctx-provider-name');
+        if (cpName) cpName.textContent = `(当前：${currentProvider().name})`;
         $('#set-rounds').value = settings.recentRounds;
         $('#set-autocompact').checked = !!settings.autoCompact;
         $('#set-waifu').checked = !!settings.waifuMode;
@@ -2069,8 +2237,12 @@ ${chunkText}
         settings.backgroundImage = $('#set-bgurl').value.trim();
         settings.backgroundBlur = parseFloat($('#set-blur').value) || 0;
         settings.backgroundOpacity = parseFloat($('#set-opacity').value) || 0.75;
-        settings.maxPromptLength = Math.min(MAX_PROMPT_CHARS, Math.max(5000, parseInt($('#set-maxlen').value, 10) || 80000));
-        settings.warnThreshold = Math.min(settings.maxPromptLength, Math.max(1000, parseInt($('#set-warn').value, 10) || 56000));
+        const cp = currentProvider();
+        const wantMax = parseInt($('#set-maxlen').value, 10) || 80000;
+        cp.maxChars = cp.type === 'free' ? 80000 : Math.min(1000000, Math.max(4000, wantMax));
+        cp.warnPercent = Math.min(95, Math.max(30, parseInt($('#set-warn').value, 10) || 70));
+        settings.maxPromptLength = cp.maxChars;
+        settings.warnThreshold = Math.round(cp.maxChars * cp.warnPercent / 100);
         settings.recentRounds = Math.min(50, Math.max(1, parseInt($('#set-rounds').value, 10) || 10));
         settings.autoCompact = $('#set-autocompact').checked;
         settings.waifuMode = $('#set-waifu').checked;
@@ -2103,7 +2275,10 @@ ${chunkText}
 
         const confirmHandler = () => {
             const newTitle = renameInput.value.trim();
-            if (newTitle) conv.title = newTitle;
+            if (newTitle && newTitle !== conv.title) {
+                conv.title = newTitle;
+                conv.titleLocked = true;
+            }
             conv.systemPrompt = (($('#rename-systemprompt') || {}).value || '').trim();
             saveAll();
             renderChatList();
@@ -2676,15 +2851,18 @@ ${chunkText}
             showToast('网络连接已断开', 'error', 3000);
         });
 
-        // 页面关闭前保存
-        window.addEventListener('beforeunload', saveAll);
+        // 页面关闭/切后台时立即落盘（IndexedDB 是异步的，尽力而为）
+        window.addEventListener('beforeunload', () => { saveMeta(); flushConversations(); });
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') { saveMeta(); flushConversations(); }
+        });
 
         // 移动端视口适配（地址栏 / 底部导航栏 / 软键盘）
         setupViewportFit();
     }
 
     // ========== 初始化 ==========
-    function init() {
+    async function init() {
         if (typeof showdown === 'undefined') { setTimeout(init, 200); return; }
 
         converter = new showdown.Converter({
@@ -2695,7 +2873,7 @@ ${chunkText}
             openLinksInNewWindow: true,
         });
 
-        loadAll();
+        await loadAll();
 
         // 一次性默认值迁移（v3）：没设过背景的用默认壁纸，遮罩透明度对齐 75%
         if (!settings._defaultsV3) {
@@ -2722,18 +2900,15 @@ ${chunkText}
         renderChatList();
         updateStats();
 
-        // 恢复活跃对话
+        // 恢复上次打开的对话
         if (activeConvId && conversations[activeConvId]) {
             rebuildMessagesUI();
         } else {
-            const keys = Object.keys(conversations);
-            if (keys.length > 0) {
-                activeConvId = keys.sort((a, b) => conversations[b].updatedAt - conversations[a].updatedAt)[0];
-                rebuildMessagesUI();
-            }
+            clearMessagesUI();
+            showWelcome();
         }
-
         updateChatTitle();
+        renderChatList();
     }
 
     if (document.readyState === 'loading') {
