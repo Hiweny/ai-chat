@@ -22,6 +22,9 @@
     --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    /* 顶栏/输入框/侧栏的玻璃参数（JS 会按气泡样式覆盖） */
+    --glass-tint: rgba(255,255,255,0.44);
+    --glass-edge-c: rgba(255,255,255,0.68);
 }
 
 /* ========== Light Theme ========== */
@@ -548,7 +551,7 @@ html, body {
     height: 44px;
     padding: 0 5px;
     border-radius: 999px;
-    background-color: rgba(255,255,255,0.44);
+    background-color: var(--glass-tint);
     background-image:
         linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.04) 52%, rgba(255,255,255,0) 100%),
         var(--glass-tex, none);
@@ -781,7 +784,6 @@ html, body {
     display: flex;
     align-items: flex-end;
     margin: 6px 16px;
-    animation: msgSlideIn 0.35s cubic-bezier(0.4, 0, 0.2, 1);
     gap: 10px;
     position: relative;
 }
@@ -840,7 +842,6 @@ html, body {
     word-wrap: break-word;
     overflow-wrap: break-word;
     position: relative;
-    transition: background 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 /* ========== Glass Bubbles ========== */
@@ -852,7 +853,7 @@ html, body {
 
 /* 纹理还没就绪时先给不透明度更高的底，避免"先纯色后变玻璃"的跳变 */
 html:not([data-glass-ready]) .bubble.ios.assistant,
-html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(255,255,255,0.64); }
+html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
 
 .bubble.modern.user {
     background: var(--bubble-user-bg);
@@ -871,9 +872,9 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
 
 /* ---- 毛玻璃：厚玻璃，白纱感强 ---- */
 .bubble.ios.assistant {
-    background-color: rgba(255, 255, 255, 0.46);
+    background-color: rgba(255, 255, 255, 0.62);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.58) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0) 100%),
+        linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.05) 42%, rgba(255,255,255,0) 100%),
         var(--glass-tex, none);
     background-attachment: scroll, fixed;
     background-size: 100% 100%, cover;
@@ -889,9 +890,9 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
 }
 
 .bubble.ios.user {
-    background-color: rgba(45, 120, 220, 0.58);
+    background-color: rgba(45, 120, 220, 0.68);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.02) 48%, rgba(255,255,255,0) 100%),
+        linear-gradient(180deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.02) 48%, rgba(255,255,255,0) 100%),
         var(--glass-tex, none);
     background-attachment: scroll, fixed;
     background-size: 100% 100%, cover;
@@ -908,9 +909,9 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
 
 /* ---- 水玻璃：薄、透、折射感 ---- */
 .bubble.water.assistant {
-    background-color: rgba(255, 255, 255, 0.11);
+    background-color: rgba(255, 255, 255, 0.20);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.40) 0%, rgba(255,255,255,0.02) 58%, rgba(255,255,255,0.06) 100%),
+        linear-gradient(180deg, rgba(255,255,255,0.36) 0%, rgba(255,255,255,0.02) 58%, rgba(255,255,255,0.06) 100%),
         var(--glass-tex, none);
     background-attachment: scroll, fixed;
     background-size: 100% 100%, cover;
@@ -926,7 +927,7 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
 }
 
 .bubble.water.user {
-    background-color: rgba(66, 140, 238, 0.38);
+    background-color: rgba(56, 128, 232, 0.50);
     background-image:
         linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.06) 46%, rgba(255,255,255,0.12) 100%),
         linear-gradient(rgba(255,255,255,0.12), rgba(255,255,255,0.12)),
@@ -945,8 +946,6 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
 }
 
 /* ---- 暗色：只换纱的颜色，纹理与高光共用 ---- */
-[data-theme="dark"] .input-wrapper { background-color: rgba(48,48,54,0.50); }
-[data-theme="dark"] .bar-pill { background-color: rgba(48,48,54,0.50); }
 [data-theme="dark"] #sidebar {
     background-image:
         linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%),
@@ -957,8 +956,6 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
 [data-theme="dark"] .bubble.ios.user { background-color: rgba(52,110,200,0.52); }
 
 @media (prefers-color-scheme: dark) {
-    [data-theme="auto"] .input-wrapper { background-color: rgba(48,48,54,0.50); }
-    [data-theme="auto"] .bar-pill { background-color: rgba(48,48,54,0.50); }
     [data-theme="auto"] #sidebar {
         background-image:
             linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%),
@@ -1372,7 +1369,7 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
     display: flex;
     align-items: flex-end;
     gap: 8px;
-    background-color: rgba(255,255,255,0.44);
+    background-color: var(--glass-tint);
     background-image:
         linear-gradient(180deg, rgba(255,255,255,0.52) 0%, rgba(255,255,255,0.03) 46%, rgba(255,255,255,0) 100%),
         var(--glass-tex, none);
@@ -1382,7 +1379,7 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
     background-repeat: no-repeat, no-repeat;
     backdrop-filter: blur(36px) saturate(195%) brightness(1.05);
     -webkit-backdrop-filter: blur(36px) saturate(195%) brightness(1.05);
-    border: 1px solid var(--glass-edge);
+    border: 1px solid var(--glass-edge-c);
     border-radius: 26px;
     padding: 10px 12px 10px 20px;
     transition: box-shadow var(--transition), transform var(--transition), border-color var(--transition);
@@ -1392,49 +1389,15 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-color: rgba(25
         inset 0 -1px 0 rgba(255,255,255,0.40);
 }
 
-/* ---- 顶栏 / 输入框 / 侧栏跟着气泡样式走 ---- */
-html[data-glass="water"] .input-wrapper {
-    background-color: rgba(255,255,255,0.12);
-    border-color: rgba(255,255,255,0.42);
-    box-shadow:
-        0 18px 44px -18px rgba(15,23,42,0.30),
-        inset 0 1px 0 rgba(255,255,255,0.90),
-        inset 0 0 22px rgba(255,255,255,0.14);
-}
-
-html[data-glass="water"] .bar-pill {
-    background-color: rgba(255,255,255,0.12);
-    border-color: rgba(255,255,255,0.42);
-    box-shadow:
-        0 12px 30px -18px rgba(15,23,42,0.32),
-        inset 0 1px 0 rgba(255,255,255,0.86),
-        inset 0 0 18px rgba(255,255,255,0.12);
-}
-
-html[data-glass="water"] #sidebar {
-    background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.10) 100%),
-        var(--glass-tex, none);
-}
-
-html[data-glass="plain"] .input-wrapper {
-    background-color: var(--bg-input);
-    background-image: none;
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-}
-
+/* ---- 顶栏 / 输入框 / 侧栏的玻璃参数由 JS 写进 CSS 变量（跟着气泡样式走） ---- */
+html[data-glass="plain"] .input-wrapper,
 html[data-glass="plain"] .bar-pill {
-    background-color: var(--bg-input);
     background-image: none;
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
 }
 
-html[data-glass="plain"] #sidebar {
-    background-image: none;
-    background-color: var(--bg-sidebar);
-}
+html[data-glass="plain"] #sidebar { background-image: none; }
 
 .input-wrapper:focus-within {
     border-color: var(--border-focus);
@@ -1955,10 +1918,9 @@ html[data-glass="plain"] #sidebar {
     to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes msgSlideIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to { opacity: 1; transform: translateY(0); }
-}
+/* 所有消息进场动画统一关闭：
+   1) 每条消息都会因 transform/opacity 反复建立-销毁合成层；
+   2) 动画结束移除类时会重新套用规则再播一次（曾经每条消息闪两次的元凶）。 */
 
 @keyframes typingBounce {
     0%, 60%, 100% { transform: translateY(0); }
@@ -2464,25 +2426,7 @@ select:focus:not(:focus-visible) {
 
 .chat-list-item:hover { padding-right: 10px; }
 
-/* 新气泡：从下方轻轻顶上来并回弹（真机聊天软件的感觉） */
-@keyframes bubblePop {
-    0%   { opacity: 0; transform: translate3d(0, 10px, 0) scale(0.985); }
-    62%  { opacity: 1; transform: translate3d(0, -1px, 0) scale(1.004); }
-    100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-
-.msg-row.pop-in {
-    animation: bubblePop 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
-    transform-origin: 50% 100%;
-}
-
-/* 用户消息从右侧滑入，AI 从左侧 */
-@keyframes bubblePopRight {
-    0%   { opacity: 0; transform: translate3d(12px, 6px, 0) scale(0.985); }
-    100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-
-.msg-row.user.pop-in { animation-name: bubblePopRight; }
+.msg-row.pop-in, .msg-row.no-anim, .msg-row.user.pop-in { animation: none !important; }
 
 /* 无头像时左侧留一点边距，避免气泡贴死屏幕 */
 .msg-row > .bubble-col:first-child { margin-left: 4px; }
