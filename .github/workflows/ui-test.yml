@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ui-test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ui:
     runs-on: ubuntu-latest
