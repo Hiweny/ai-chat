@@ -253,6 +253,80 @@ ok('刷新后对话仍在列表', convStillExists >= 1, `count=${convStillExists
 
 await page.screenshot({ path: path.join(OUT, '09-after-reload.jpg'), type: 'jpeg', quality: 72 });
 
+// ---------- 7. 液态玻璃 & 合成层质量 ----------
+for (let i = 0; i < 4; i++) {
+    const label = String(await page.textContent('#mode-label') || '').trim();
+    if (label === 'AI') break;
+    await page.click('#mode-btn');
+    await page.waitForTimeout(400);
+}
+
+for (let i = 1; i <= 5; i++) {
+    await page.evaluate((n) => {
+        window.__canned = '这是第 ' + n + ' 条测试回复，用来把对话拉长到一屏以上，方便观察毛玻璃与滚动合成层的表现。';
+        const el = document.querySelector('#chat-input');
+        el.value = '消息 ' + n;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+    }, i);
+    await page.click('#send-btn');
+    await page.waitForTimeout(1500);
+}
+await page.waitForTimeout(600);
+await page.screenshot({ path: path.join(OUT, '10-glass-long.jpg'), type: 'jpeg', quality: 72 });
+
+const glass = await page.evaluate(() => {
+    const bubbles = [...document.querySelectorAll('.bubble')];
+    const cs = (el) => el ? getComputedStyle(el) : null;
+    const inView = bubbles.filter(b => b.classList.contains('in-view'));
+    const out = bubbles.find(b => !b.classList.contains('in-view'));
+    const iw = document.querySelector('.input-wrapper');
+    const pill = document.querySelector('.bar-pill');
+    return {
+        total: bubbles.length,
+        inView: inView.length,
+        sampleIn: inView.length ? cs(inView[0]).backdropFilter : '',
+        sampleOut: out ? cs(out).backdropFilter : 'NONE-OUTSIDE',
+        input: cs(iw).backdropFilter,
+        inputShadow: cs(iw).boxShadow,
+        inputRadius: cs(iw).borderRadius,
+        pill: cs(pill).backdropFilter,
+    };
+});
+ok('存在视口内气泡', glass.inView > 0, `inView=${glass.inView}/${glass.total}`);
+ok('视口内气泡挂着真实模糊', /blur\(/.test(glass.sampleIn), glass.sampleIn);
+ok('视口外气泡不挂模糊', glass.sampleOut === 'none' || glass.sampleOut === 'NONE-OUTSIDE', glass.sampleOut);
+ok('只让少数气泡占用合成层', glass.inView < glass.total, `inView=${glass.inView}/${glass.total}`);
+ok('输入框是毛玻璃', /blur\(/.test(glass.input) && /saturate/.test(glass.input), glass.input);
+ok('输入框有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
+ok('输入框圆角足够大', parseFloat(glass.inputRadius) >= 24, glass.inputRadius);
+ok('胶囊条是毛玻璃', /blur\(/.test(glass.pill), glass.pill);
+
+// 侧栏
+await page.click('#menu-btn');
+await page.waitForTimeout(600);
+await page.screenshot({ path: path.join(OUT, '11-sidebar-glass.jpg'), type: 'jpeg', quality: 72 });
+const side = await page.evaluate(() => {
+    const sb = document.querySelector('#sidebar');
+    const cs = getComputedStyle(sb);
+    const btn = document.querySelector('.chat-list-item .item-action-btn');
+    return {
+        bgImage: cs.backgroundImage,
+        filter: cs.backdropFilter,
+        hasOldSettings: !!document.querySelector('#sidebar-settings-btn'),
+        hasFooter: !!document.querySelector('.sidebar-footer'),
+        iconSvg: !!(btn && btn.querySelector('svg')),
+        iconText: btn ? String(btn.textContent || '').trim() : 'NO-BTN',
+    };
+});
+ok('侧栏是磨砂玻璃', /blur\(/.test(side.filter) && /gradient/.test(side.bgImage), side.filter);
+ok('侧栏左下角设置按钮已移除', !side.hasOldSettings && !side.hasFooter);
+ok('对话操作按钮改线条图标', side.iconSvg === true && side.iconText === '', side.iconText);
+await page.evaluate(() => {
+    const ov = document.querySelector('#sidebar-overlay');
+    if (ov) ov.click();
+});
+await page.waitForTimeout(400);
+
 // ---------- 7. 报错汇总 ----------
 const realErrors = errors.filter(e => !/favicon|net::ERR|Failed to load resource/i.test(e));
 ok('无 JS 运行时错误', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
