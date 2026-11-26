@@ -482,7 +482,12 @@
 
     function msgText(m) {
         if (!m) return '';
-        if (m.type === 'image') return `[图片：${m.prompt || '已生成的图片'}]`;
+        if (m.type === 'image') {
+            const p = String(m.prompt || '').trim();
+            if (!p) return '[发了一张图片]';
+            const brief = p.length > 140 ? p.slice(0, 140) + '…' : p;
+            return `[发了一张图片，画面：${brief}]`;
+        }
         return m.content || '';
     }
 
@@ -1636,13 +1641,13 @@
 2. 按主题归并，不要按时间顺序写流水账；只有在时间跨度较大时，才用一个简短的时间线把几个关键节点串起来（例如"11-20 定了方案 → 11-23 推翻重做 → 11-26 定稿"）。
 3. 如果给了【已有摘要】，把它和新内容合并成一份：仍然有效的保留，被推翻的用新结论替换，重复的合并；不要出现"之前提到过""如前所述"这类指代。
 4. 不要编造对话里没有的信息，不要加评论、评价和建议。
-5. 直接输出档案正文，不要前言、不要总结自己的总结。`;
+5. 图片消息会以「[发了一张图片，画面：英文描述]」的形式出现。请在摘要里把它归纳成一句中文（例如"给他发了一张雨夜街头撑着透明伞的自拍"），保留是谁要的、什么场景、什么感觉即可，不要照抄英文原文，也不要把每张图都单独列一行。
+6. 直接输出档案正文，不要前言、不要总结自己的总结。`;
 
     async function requestSummary(existing, chunkText) {
         const now = new Date();
-        const prompt = `${SUMMARY_INSTRUCTION}
-
-【当前时间】${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}
+        const head = `【当前时间】${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const bodyText = `${head}
 
 【已有摘要】
 ${existing || '（无）'}
@@ -1654,21 +1659,17 @@ ${chunkText}
 
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), SUMMARY_TIMEOUT);
+        let text = '';
         try {
-            const resp = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt }),
+            await callChat({
+                promptText: `${SUMMARY_INSTRUCTION}\n\n${bodyText}`,
+                messages: [
+                    { role: 'system', content: SUMMARY_INSTRUCTION },
+                    { role: 'user', content: bodyText },
+                ],
                 signal: ctrl.signal,
+                onDelta: (d) => { text += d; },
             });
-            if (!resp.ok) throw new Error(`总结请求失败 HTTP ${resp.status}`);
-            const reader = resp.body.getReader();
-            let text = '';
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                text += new TextDecoder().decode(value);
-            }
             return filterAd(text).trim();
         } finally {
             clearTimeout(timer);
