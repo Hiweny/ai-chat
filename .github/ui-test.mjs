@@ -338,9 +338,11 @@ const water = await page.evaluate(() => {
     };
 });
 ok('水玻璃气泡也用纹理（无 backdrop-filter）', water.found && water.tex && water.blurOn === false, JSON.stringify(water).slice(0, 120));
-ok('水玻璃比毛玻璃更透', /0\.1\d/.test(water.color), water.color);
-ok('输入框跟随水玻璃样式', /0\.1\d/.test(water.inputColor), water.inputColor);
-ok('胶囊条跟随水玻璃样式', /0\.1\d/.test(water.pillColor), water.pillColor);
+const alphaOf = (c) => { const m = String(c).match(/rgba?\([^)]*?,\s*([\d.]+)\s*\)/); return m ? parseFloat(m[1]) : 1; };
+ok('水玻璃比毛玻璃更透', alphaOf(water.color) < 0.45, water.color);
+ok('输入框跟随水玻璃样式', alphaOf(water.inputColor) < 0.3, water.inputColor);
+ok('胶囊条跟随水玻璃样式', alphaOf(water.pillColor) < 0.3, water.pillColor);
+ok('输入框与气泡是同一档透明度', Math.abs(alphaOf(water.inputColor) - 0.16) < 0.06, water.inputColor);
 ok('根节点样式已切到 water', water.mode === 'water', water.mode);
 
 // 侧栏
