@@ -49,7 +49,7 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForTimeout(800);
 
 // ---------- 1. 首页 ----------
-await page.screenshot({ path: path.join(OUT, '01-home.png') });
+await page.screenshot({ path: path.join(OUT, '01-home.jpg'), type: 'jpeg', quality: 72 });
 const welcomeVisible = await page.isVisible('#welcome-screen');
 ok('首页显示欢迎屏', welcomeVisible);
 const hintCards = await page.locator('.hint-card').count();
@@ -68,12 +68,12 @@ ok('标题在左胶囊右侧', geo.T.x >= geo.L.r - 2, JSON.stringify(geo));
 ok('标题在右胶囊左侧', geo.T.r <= geo.R.x + 2, JSON.stringify(geo));
 ok('左胶囊只包汉堡（宽度 < 60）', geo.L.w < 60, `w=${geo.L.w}`);
 ok('标题占满中间空隙', geo.T.w > 60, `w=${geo.T.w}`);
-await page.screenshot({ path: path.join(OUT, '02-topbar.png'), clip: { x: 0, y: 0, width: 390, height: 80 } });
+await page.screenshot({ path: path.join(OUT, '02-topbar.jpg'), type: 'jpeg', quality: 72, clip: { x: 0, y: 0, width: 390, height: 80 } });
 
 // ---------- 3. 设置面板 ----------
 await page.click('#settings-top-btn');
 await page.waitForTimeout(400);
-await page.screenshot({ path: path.join(OUT, '03-settings-top.png') });
+await page.screenshot({ path: path.join(OUT, '03-settings-top.jpg'), type: 'jpeg', quality: 72 });
 const hasProvider = await page.isVisible('#set-provider');
 const hasCtx = await page.isVisible('#set-maxlen');
 const warnVal = await page.getAttribute('#set-warn', 'max');
@@ -89,7 +89,7 @@ ok('上下文区块在聊天/生图之后、提示词之前',
     JSON.stringify(order));
 await page.evaluate(() => { document.querySelector('#settings-panel .settings-body').scrollTop = 99999; });
 await page.waitForTimeout(300);
-await page.screenshot({ path: path.join(OUT, '04-settings-bottom.png') });
+await page.screenshot({ path: path.join(OUT, '04-settings-bottom.jpg'), type: 'jpeg', quality: 72 });
 await page.click('#close-settings');
 await page.waitForTimeout(300);
 
@@ -102,7 +102,7 @@ await page.evaluate(() => {
 });
 await page.click('#send-btn');
 await page.waitForTimeout(2500);
-await page.screenshot({ path: path.join(OUT, '05-chat-normal.png') });
+await page.screenshot({ path: path.join(OUT, '05-chat-normal.jpg'), type: 'jpeg', quality: 72 });
 const msgCount = await page.locator('.msg-row').count();
 ok('普通模式生成了一条 AI 回复', msgCount >= 2, `rows=${msgCount}`);
 const aiText = await page.locator('.msg-row.assistant .bubble-content').last().textContent();
@@ -126,7 +126,7 @@ const meta = await page.evaluate(() => {
 });
 ok('时间戳在气泡外部', meta && meta.inBubble === false, JSON.stringify(meta));
 ok('时间戳在气泡下方', meta && meta.metaTop >= meta.bubbleBottom - 2, JSON.stringify(meta));
-await page.screenshot({ path: path.join(OUT, '06-timestamp.png') });
+await page.screenshot({ path: path.join(OUT, '06-timestamp.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 5. Waifu 模式 ----------
 await page.evaluate(() => { localStorage.removeItem('aichat_meta_v3'); });
@@ -145,7 +145,7 @@ await page.evaluate(() => {
 });
 await page.click('#send-btn');
 await page.waitForTimeout(9000);
-await page.screenshot({ path: path.join(OUT, '07-waifu.png'), fullPage: false });
+await page.screenshot({ path: path.join(OUT, '07-waifu.jpg'), type: 'jpeg', quality: 72, fullPage: false });
 const wfRows = await page.locator('.msg-row.assistant').count();
 ok('waifu 模式拆成多条气泡', wfRows >= 2, `rows=${wfRows}`);
 const wfTexts = await page.locator('.msg-row.assistant .bubble-content').allTextContents();
@@ -168,12 +168,12 @@ const orderRows = await page.evaluate(() => [...document.querySelectorAll('.msg-
 const imgIdx = orderRows.findIndex(r => r.img);
 ok('waifu 生成了图片', imgIdx >= 0, JSON.stringify(orderRows.map(r => (r.img ? '[IMG]' : r.text.slice(0, 8)))));
 ok('图片插在两条消息之间而不是最下方', imgIdx >= 0 && imgIdx < orderRows.length - 1, `imgIdx=${imgIdx} total=${orderRows.length}`);
-await page.screenshot({ path: path.join(OUT, '07b-waifu-image.png') });
+await page.screenshot({ path: path.join(OUT, '07b-waifu-image.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 6. 多会话与刷新 ----------
 await page.evaluate(() => document.querySelector('#menu-btn').click());
 await page.waitForTimeout(600);
-await page.screenshot({ path: path.join(OUT, '08-sidebar.png') });
+await page.screenshot({ path: path.join(OUT, '08-sidebar.jpg'), type: 'jpeg', quality: 72 });
 await page.evaluate(() => document.querySelector('#new-chat-btn').click());
 await page.waitForTimeout(500);
 const titleAfterNew = await page.textContent('#chat-title');
@@ -212,7 +212,7 @@ ok('刷新后仍停留在该对话', String(titleAfterReload).includes('我的�
 const convStillExists = await page.locator('.chat-list-item').count();
 ok('刷新后对话仍在列表', convStillExists >= 1, `count=${convStillExists}`);
 
-await page.screenshot({ path: path.join(OUT, '09-after-reload.png') });
+await page.screenshot({ path: path.join(OUT, '09-after-reload.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 7. 报错汇总 ----------
 const realErrors = errors.filter(e => !/favicon|net::ERR|Failed to load resource/i.test(e));
