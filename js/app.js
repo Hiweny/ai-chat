@@ -59,7 +59,7 @@
         autoCompact: true,
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         bubbleStyle: 'modern',
-        backgroundImage: 'https://t.alcy.cc/ycy',
+        backgroundImage: 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg',
         backgroundBlur: 0,
         backgroundBrightness: 100,
         // 多供应商
@@ -788,6 +788,36 @@
         }
     }
 
+    // ========== 毛玻璃合成层管理 ==========
+    // backdrop-filter 元素一多，合成器会降级（表现为越往下气泡越"白块"）。
+    // 只让视口附近的元素保留模糊，其余退回高不透明度纯色，质量始终稳定。
+    let glassObserver = null;
+
+    function primeBubble(el) {
+        if (!el || !el.classList) return;
+        if (!('IntersectionObserver' in window)) { el.classList.add('in-view'); return; }
+        if (!glassObserver) {
+            glassObserver = new IntersectionObserver(entries => {
+                for (const en of entries) {
+                    en.target.classList.toggle('in-view', en.isIntersecting);
+                }
+            }, { root: null, rootMargin: '300px 0px 300px 0px', threshold: 0 });
+        }
+        glassObserver.observe(el);
+    }
+
+    function observeGlass(root) {
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll('.bubble').forEach(primeBubble);
+        if (root.classList && root.classList.contains('bubble')) primeBubble(root);
+    }
+
+    // 进场动画结束后立刻卸掉动画层，否则 transform 会一直破坏内部的 backdrop-filter
+    document.addEventListener('animationend', (e) => {
+        const el = e.target;
+        if (el && el.classList && el.classList.contains('pop-in')) el.classList.remove('pop-in');
+    }, true);
+
     // ========== 渲染消息 ==========
     function renderMessage(msg, animate = true, skipScroll = false) {
         hideWelcome();
@@ -902,6 +932,7 @@
         });
 
         messagesContainer.appendChild(row);
+        observeGlass(row);
         if (!skipScroll) scrollToBottom();
     }
 
@@ -1921,6 +1952,7 @@ ${chunkText}
             msgs.forEach(m => renderMessage(m, false, true));
             scrollToBottom(true);
         }
+        observeGlass(messagesContainer);
         updateContextUsage();
     }
 
@@ -2017,8 +2049,12 @@ ${chunkText}
                     ${preview ? `<span class="item-preview">${escapeHTML(preview)}</span>` : ''}
                 </div>
                 <div class="item-actions">
-                    <button class="item-action-btn" title="对话设置" data-action="rename">\u2699\ufe0f</button>
-                    <button class="item-action-btn danger" title="删除" data-action="delete">\u2715</button>
+                    <button class="item-action-btn" title="重命名" data-action="rename" aria-label="重命名">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    </button>
+                    <button class="item-action-btn danger" title="删除" data-action="delete" aria-label="删除">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
                 </div>
             `;
             item.querySelector('.item-info').addEventListener('click', () => switchConversation(id));
@@ -2819,7 +2855,6 @@ ${chunkText}
         $('#msg-search-next').addEventListener('click', () => navigateMsgSearch(1));
 
         // 设置
-        $('#sidebar-settings-btn').addEventListener('click', () => { openSettings(); closeSidebar(); });
         settingsOverlay.addEventListener('click', closeSettings);
         $('#close-settings').addEventListener('click', closeSettings);
 
@@ -3035,6 +3070,13 @@ ${chunkText}
             if (!settings.backgroundBlur) settings.backgroundBlur = 0;
             if (settings.backgroundBrightness === undefined) settings.backgroundBrightness = 100;
             settings._defaultsV3 = true;
+        }
+
+        // v4：换默认壁纸（这张图作为新的出厂背景）
+        if (!settings._defaultsV4) {
+            settings.backgroundImage = 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg';
+            settings._defaultsV4 = true;
+            if (typeof saveSettings === 'function') saveSettings();
         }
         ensureProviders();
 
