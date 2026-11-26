@@ -307,7 +307,7 @@ const glass = await page.evaluate(() => {
 });
 ok('气泡已改用预模糊纹理', glass.withTex > 0, `tex=${glass.withTex}/${glass.total}`);
 ok('气泡不挂 backdrop-filter（不会降级）', glass.withBlur === 0, `blur=${glass.withBlur}/${glass.total}`);
-ok('纹理是 fixed 定位（与背景对齐）', /fixed/.test(glass.attach), glass.attach);
+ok('纹理是平铺柔光（不随滚动重采样）', /scroll/.test(glass.attach) && !/fixed/.test(glass.attach), glass.attach);
 ok('玻璃样式已同步到根节点', glass.mode === 'ios', glass.mode);
 ok('输入框使用同一张纹理', glass.inputTex === true);
 ok('输入框仍有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
