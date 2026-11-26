@@ -249,7 +249,7 @@
         { id: 'free', name: '公益接口（默认）', type: 'free', baseUrl: 'https://free-api.cnmwx.com/v1/completions', apiKey: '', model: '' }
     ];
     const DEFAULT_IMAGE_PROVIDERS = [
-        { id: 'gitee', name: 'Gitee AI（默认）', baseUrl: 'https://ai.gitee.com/v1', apiKey: 'KFMC4IBLB0V8LFYOWWVMERUJMQ29HNR3LJQSQTHN', model: 'z-image-turbo', size: '1024x1024' }
+        { id: 'gitee', name: 'Gitee AI（默认）', baseUrl: 'https://ai.gitee.com/v1', apiKey: '', model: 'z-image-turbo', size: '1024x1024' }
     ];
 
     function ensureProviders() {
