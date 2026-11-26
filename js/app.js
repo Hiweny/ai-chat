@@ -1811,6 +1811,7 @@ ${chunkText}
         updateStats();
         clearMessagesUI();
         showWelcome();
+        applyMode();
         if (focusInput) setTimeout(() => chatInput.focus(), 100);
         return id;
     }
@@ -1846,6 +1847,7 @@ ${chunkText}
         rebuildMessagesUI();
         updateChatTitle();
         updateStats();
+        applyMode();
         showToast('对话已删除', 'info', 1500);
     }
 
