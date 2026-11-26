@@ -239,21 +239,7 @@
                 </div>
             </div>
 
-            <!-- 系统提示词 -->
-            <div class="settings-section">
-                <div class="section-title">系统提示词</div>
-                <div class="setting-item">
-                    <label>全局角色设定 <span class="hint-text">(压缩时不会被归纳)</span></label>
-                    <textarea id="set-systemprompt" rows="5" placeholder="例如：你是一位严谨的中文写作助手，回答简洁，不使用表情符号。"></textarea>
-                    <div class="system-prompt-actions">
-                        <button id="save-systemprompt" class="btn-small">保存</button>
-                        <button id="clear-systemprompt" class="btn-small">清空</button>
-                        <span id="systemprompt-status" class="hint-text"></span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 上下文 -->
+            <!-- 上下文（跟随当前聊天接口） -->
             <div class="settings-section">
                 <div class="section-title">上下文与模式</div>
                 <div class="setting-item">
@@ -263,12 +249,12 @@
                     </label>
                 </div>
                 <div class="setting-item">
-                    <label>上下文上限 <span class="hint-text">(字符，接口硬上限约 8.4 万)</span></label>
-                    <input type="number" id="set-maxlen" min="5000" max="84000" step="1000" value="80000">
+                    <label>上下文上限 <span class="hint-text" id="ctx-provider-name">(跟随当前接口)</span></label>
+                    <input type="number" id="set-maxlen" min="4000" max="1000000" step="1000" value="80000">
                 </div>
                 <div class="setting-item">
-                    <label>提醒阈值 <span class="hint-text">(字符)</span></label>
-                    <input type="number" id="set-warn" min="1000" max="84000" step="1000" value="56000">
+                    <label>提醒阈值 <span class="hint-text">(%)</span></label>
+                    <input type="number" id="set-warn" min="30" max="95" step="5" value="70">
                 </div>
                 <div class="setting-item">
                     <label>保留最近轮数 <span class="hint-text">(不参与压缩)</span></label>
@@ -281,6 +267,20 @@
                     </label>
                 </div>
                 <div id="context-usage" class="context-usage">上下文用量：--</div>
+            </div>
+
+            <!-- 系统提示词 -->
+            <div class="settings-section">
+                <div class="section-title">系统提示词</div>
+                <div class="setting-item">
+                    <label>全局角色设定 <span class="hint-text">(压缩时不会被归纳)</span></label>
+                    <textarea id="set-systemprompt" rows="5" placeholder="例如：你是一位严谨的中文写作助手，回答简洁，不使用表情符号。"></textarea>
+                    <div class="system-prompt-actions">
+                        <button id="save-systemprompt" class="btn-small">保存</button>
+                        <button id="clear-systemprompt" class="btn-small">清空</button>
+                        <span id="systemprompt-status" class="hint-text"></span>
+                    </div>
+                </div>
             </div>
 
             <!-- 外观 -->
