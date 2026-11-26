@@ -285,29 +285,34 @@ await page.screenshot({ path: path.join(OUT, '10-glass-long.jpg'), type: 'jpeg',
 const glass = await page.evaluate(() => {
     const bubbles = [...document.querySelectorAll('.bubble')];
     const cs = (el) => el ? getComputedStyle(el) : null;
-    const inView = bubbles.filter(b => b.classList.contains('in-view'));
-    const out = bubbles.find(b => !b.classList.contains('in-view'));
+    const withBlur = bubbles.filter(b => /blur\(/.test(cs(b).backdropFilter || ''));
+    const withTex = bubbles.filter(b => /data:image/.test(cs(b).backgroundImage || ''));
     const iw = document.querySelector('.input-wrapper');
     const pill = document.querySelector('.bar-pill');
     return {
         total: bubbles.length,
-        inView: inView.length,
-        sampleIn: inView.length ? cs(inView[0]).backdropFilter : '',
-        sampleOut: out ? cs(out).backdropFilter : 'NONE-OUTSIDE',
+        withBlur: withBlur.length,
+        withTex: withTex.length,
+        texVar: getComputedStyle(document.documentElement).getPropertyValue('--glass-tex').slice(0, 30),
         input: cs(iw).backdropFilter,
+        inputColor: cs(iw).backgroundColor,
+        inputTex: /data:image/.test(cs(iw).backgroundImage || ''),
         inputShadow: cs(iw).boxShadow,
         inputRadius: cs(iw).borderRadius,
         pill: cs(pill).backdropFilter,
+        pillTex: /data:image/.test(cs(pill).backgroundImage || ''),
+        attach: cs(bubbles[bubbles.length - 1]).backgroundAttachment,
+        mode: document.documentElement.getAttribute('data-glass'),
     };
 });
-ok('存在视口内气泡', glass.inView > 0, `inView=${glass.inView}/${glass.total}`);
-ok('视口内气泡挂着真实模糊', /blur\(/.test(glass.sampleIn), glass.sampleIn);
-ok('视口外气泡不挂模糊', glass.sampleOut === 'none' || glass.sampleOut === 'NONE-OUTSIDE', glass.sampleOut);
-ok('只让少数气泡占用合成层', glass.inView < glass.total, `inView=${glass.inView}/${glass.total}`);
-ok('输入框是毛玻璃', /blur\(/.test(glass.input) && /saturate/.test(glass.input), glass.input);
-ok('输入框有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
+ok('气泡已改用预模糊纹理', glass.withTex > 0, `tex=${glass.withTex}/${glass.total}`);
+ok('气泡不挂 backdrop-filter（不会降级）', glass.withBlur === 0, `blur=${glass.withBlur}/${glass.total}`);
+ok('纹理是 fixed 定位（与背景对齐）', /fixed/.test(glass.attach), glass.attach);
+ok('玻璃样式已同步到根节点', glass.mode === 'ios', glass.mode);
+ok('输入框使用同一张纹理', glass.inputTex === true);
+ok('输入框仍有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
 ok('输入框圆角足够大', parseFloat(glass.inputRadius) >= 24, glass.inputRadius);
-ok('胶囊条是毛玻璃', /blur\(/.test(glass.pill), glass.pill);
+ok('胶囊条使用同一张纹理', glass.pillTex === true);
 
 // 水玻璃预设
 await page.click('#settings-top-btn');
@@ -318,12 +323,25 @@ await page.click('#close-settings');
 await page.waitForTimeout(700);
 await page.screenshot({ path: path.join(OUT, '10b-glass-water.jpg'), type: 'jpeg', quality: 72 });
 const water = await page.evaluate(() => {
-    const b = [...document.querySelectorAll('.bubble.in-view')].find(x => x.classList.contains('water'));
-    if (!b) return { found: false, cf: '' };
-    return { found: true, cf: getComputedStyle(b).backdropFilter };
+    const cs = (el) => el ? getComputedStyle(el) : null;
+    const b = document.querySelector('.bubble.water.assistant');
+    const iw = document.querySelector('.input-wrapper');
+    const pill = document.querySelector('.bar-pill');
+    return {
+        found: !!b,
+        color: b ? cs(b).backgroundColor : '',
+        tex: b ? /data:image/.test(cs(b).backgroundImage || '') : false,
+        blurOn: b ? /blur\(/.test(cs(b).backdropFilter || '') : true,
+        inputColor: cs(iw).backgroundColor,
+        pillColor: cs(pill).backgroundColor,
+        mode: document.documentElement.getAttribute('data-glass'),
+    };
 });
-const satuStrong = /saturate\((2\.\d+|2\d\d%)\)/.test(water.cf);
-ok('水玻璃气泡有强模糊与高饱和', water.found && /blur\(3[0-9]px\)/.test(water.cf) && satuStrong, water.cf);
+ok('水玻璃气泡也用纹理（无 backdrop-filter）', water.found && water.tex && water.blurOn === false, JSON.stringify(water).slice(0, 120));
+ok('水玻璃比毛玻璃更透', /0\.1\d/.test(water.color), water.color);
+ok('输入框跟随水玻璃样式', /0\.1\d/.test(water.inputColor), water.inputColor);
+ok('胶囊条跟随水玻璃样式', /0\.1\d/.test(water.pillColor), water.pillColor);
+ok('根节点样式已切到 water', water.mode === 'water', water.mode);
 
 // 侧栏
 await page.click('#menu-btn');
