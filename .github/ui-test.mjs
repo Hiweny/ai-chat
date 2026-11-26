@@ -184,7 +184,7 @@ await page.evaluate(() => {
 await page.evaluate(() => document.querySelector('#send-btn').click());
 await page.waitForTimeout(14000);
 const orderRows = await page.evaluate(() => [...document.querySelectorAll('.msg-row')].map(r => ({
-    img: !!r.querySelector('.msg-image'),
+    img: !!r.querySelector('.image-msg img'),
     failed: (r.textContent || '').includes('生图失败'),
     text: (r.querySelector('.bubble-content') || {}).textContent || ''
 })));
