@@ -240,8 +240,8 @@ html, body {
     height: 100vh;
     height: 100dvh;
     background: var(--bg-sidebar);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -519,8 +519,8 @@ html, body {
     background: var(--bg-input);
     border: 1px solid var(--border-color);
     box-shadow: var(--shadow-sm);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(12px) saturate(140%);
+    -webkit-backdrop-filter: blur(12px) saturate(140%);
     min-width: 0;
 }
 
@@ -819,19 +819,15 @@ html, body {
 }
 
 .bubble.ios.user {
-    background: rgba(45, 120, 220, 0.7);
+    background: rgba(45, 120, 220, 0.82);
     color: #fff;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.2);
     border-bottom-right-radius: 6px;
 }
 
 .bubble.ios.assistant {
-    background: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.82);
     color: var(--text-primary);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.3);
     border-bottom-left-radius: 6px;
 }
@@ -852,19 +848,15 @@ html, body {
 }
 
 .bubble.water.user {
-    background: rgba(45, 120, 220, 0.35);
+    background: rgba(45, 120, 220, 0.52);
     color: #fff;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255,255,255,0.15);
     border-bottom-right-radius: 6px;
 }
 
 .bubble.water.assistant {
-    background: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.46);
     color: var(--text-primary);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     border: 1px solid rgba(255,255,255,0.2);
     border-bottom-left-radius: 6px;
 }
@@ -1221,8 +1213,8 @@ html, body {
     width: 480px;
     max-width: calc(100vw - 32px);
     background: var(--bg-secondary);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
     box-shadow: var(--shadow-lg);
@@ -1290,8 +1282,8 @@ html, body {
     align-items: flex-end;
     gap: 8px;
     background: var(--bg-input);
-    backdrop-filter: blur(25px);
-    -webkit-backdrop-filter: blur(25px);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     padding: 8px 10px 8px 18px;
@@ -1443,8 +1435,8 @@ html, body {
     max-width: calc(100vw - 32px);
     max-height: 85vh;
     background: var(--bg-secondary);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-color);
     box-shadow: var(--shadow-lg);
@@ -1672,8 +1664,8 @@ html, body {
     width: 360px;
     max-width: calc(100vw - 32px);
     background: var(--bg-secondary);
-    backdrop-filter: blur(30px);
-    -webkit-backdrop-filter: blur(30px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border-radius: var(--radius-md);
     border: 1px solid var(--border-color);
     box-shadow: var(--shadow-lg);
@@ -2305,3 +2297,104 @@ select:focus:not(:focus-visible) {
 .provider-item { min-height: 46px; align-items: flex-start; padding: 9px 12px; }
 .provider-item > div { line-height: 1.45; }
 .provider-item .p-name { display: inline-block; margin-bottom: 2px; }
+
+/* ============================================================
+   v5：气泡弹出动画 / 侧栏按钮常显 / 无头像布局
+   ============================================================ */
+
+/* 侧栏操作按钮常显（移动端没有 hover） */
+.chat-list-item .item-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+    opacity: 0.72;
+    transition: opacity var(--transition-fast);
+}
+
+.chat-list-item:hover .item-actions,
+.chat-list-item.active .item-actions { opacity: 1; }
+
+.chat-list-item:hover { padding-right: 10px; }
+
+/* 新气泡：从下方轻轻顶上来并回弹（真机聊天软件的感觉） */
+@keyframes bubblePop {
+    0%   { opacity: 0; transform: translate3d(0, 14px, 0) scale(0.96); }
+    55%  { opacity: 1; transform: translate3d(0, -2px, 0) scale(1.008); }
+    100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.msg-row.pop-in {
+    animation: bubblePop 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+    will-change: transform, opacity;
+}
+
+/* 用户消息从右侧滑入，AI 从左侧 */
+@keyframes bubblePopRight {
+    0%   { opacity: 0; transform: translate3d(16px, 8px, 0) scale(0.96); }
+    100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.msg-row.user.pop-in { animation-name: bubblePopRight; }
+
+/* 无头像时左侧留一点边距，避免气泡贴死屏幕 */
+.msg-row > .bubble-col:first-child { margin-left: 4px; }
+.msg-row.user > .bubble-col:first-child { margin-left: 0; margin-right: 4px; }
+
+/* 上下文内联块 */
+.ctx-inline {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+}
+
+.ctx-inline-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+.ctx-inline .setting-item { margin-bottom: 10px; }
+.ctx-inline .context-usage { background: transparent; padding: 0; margin-top: 2px; }
+
+
+/* 背景层独立合成，滚动时不重绘 */
+#bg-layer { transform: translateZ(0); will-change: transform; }
+#grain-overlay { pointer-events: none; }
+
+/* ============================================================
+   v6：图片直接发送（无气泡）
+   ============================================================ */
+.image-msg {
+    max-width: 72%;
+    min-width: 120px;
+}
+
+.image-msg img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 18px;
+    cursor: zoom-in;
+    box-shadow: var(--shadow-sm);
+    background: var(--bg-tertiary);
+}
+
+.image-msg .image-loading {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.image-msg [style*="danger"] {
+    padding: 10px 14px;
+    border-radius: 18px;
+    background: var(--bg-secondary);
+}
+
+@media (max-width: 768px) {
+    .image-msg { max-width: 82%; }
+}
