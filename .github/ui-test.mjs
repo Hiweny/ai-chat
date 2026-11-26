@@ -322,7 +322,8 @@ const water = await page.evaluate(() => {
     if (!b) return { found: false, cf: '' };
     return { found: true, cf: getComputedStyle(b).backdropFilter };
 });
-ok('水玻璃气泡有强模糊与高饱和', water.found && /blur\(3[0-9]px\)/.test(water.cf) && /saturate\(2[0-9][0-9]%\)/.test(water.cf), water.cf);
+const satuStrong = /saturate\((2\.\d+|2\d\d%)\)/.test(water.cf);
+ok('水玻璃气泡有强模糊与高饱和', water.found && /blur\(3[0-9]px\)/.test(water.cf) && satuStrong, water.cf);
 
 // 侧栏
 await page.click('#menu-btn');
