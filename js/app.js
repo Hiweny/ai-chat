@@ -501,11 +501,19 @@
         return parts.join('\n\n');
     }
 
-    // 历史消息：排除本轮（已 push 的那条），只取最近 N 轮
+    // 历史消息：排除本轮（已 push 的那条），只取最近 N 轮。
+    // 注意按「轮」算而不是按条数——waifu 模式一条回复会拆成好几条 AI 消息
     function historyMsgs(userMsg) {
         let msgs = getMessages().slice();
         if (userMsg && msgs.length > 0 && msgs[msgs.length - 1].role === 'user') msgs = msgs.slice(0, -1);
-        return msgs.slice(-settings.recentRounds * 2);
+        const rounds = Math.max(1, parseInt(settings.recentRounds, 10) || 10);
+        let start = msgs.length;
+        let r = 0;
+        while (start > 0 && r < rounds) {
+            start--;
+            if (msgs[start].role === 'user') r++;
+        }
+        return msgs.slice(start);
     }
 
     function buildPrompt(userMsg) {
@@ -1675,10 +1683,15 @@ ${chunkText}
         if (!conv) { if (manual) showToast('当前没有对话可压缩', 'warning'); return false; }
 
         const keepRounds = Math.max(1, parseInt(settings.recentRounds, 10) || 10);
-        const keepCount = keepRounds * 2;
         const total = conv.messages.length;
-        const keep = total > keepCount ? conv.messages.slice(total - keepCount) : conv.messages.slice();
-        const toCompress = total > keepCount ? conv.messages.slice(0, total - keepCount) : [];
+        let keepStart = total;
+        let rr = 0;
+        while (keepStart > 0 && rr < keepRounds) {
+            keepStart--;
+            if (conv.messages[keepStart].role === 'user') rr++;
+        }
+        const keep = conv.messages.slice(keepStart);
+        const toCompress = conv.messages.slice(0, keepStart);
 
         if (toCompress.length === 0) {
             if (manual) showToast(`对话不足 ${keepRounds} 轮，暂时不需要压缩`, 'info');
@@ -2043,6 +2056,7 @@ ${chunkText}
                 saveAll();
                 renderProviderList();
                 renderProviderSelects();
+                updateContextUsage();
                 showToast(`已切换到「${p.name}」`, 'success', 1500);
             });
             box.appendChild(el);
@@ -2210,7 +2224,14 @@ ${chunkText}
         $('#set-maxlen').value = providerMaxChars();
         $('#set-warn').value = providerWarnPercent();
         const cpName = $('#ctx-provider-name');
-        if (cpName) cpName.textContent = `(当前：${currentProvider().name})`;
+        const cp = currentProvider();
+        if (cpName) cpName.textContent = `(当前：${cp.name})`;
+        const maxInput = $('#set-maxlen');
+        if (maxInput) {
+            maxInput.readOnly = cp.type === 'free';
+            maxInput.style.opacity = cp.type === 'free' ? '0.6' : '1';
+            maxInput.title = cp.type === 'free' ? '免费接口受 256KB 请求体限制，固定 80000 字符' : '';
+        }
         $('#set-rounds').value = settings.recentRounds;
         $('#set-autocompact').checked = !!settings.autoCompact;
         $('#set-waifu').checked = !!settings.waifuMode;
@@ -2286,6 +2307,7 @@ ${chunkText}
             updateContextUsage();
             showToast('已保存', 'success', 1500);
             closeRename();
+            closeSidebar();   // 保存后自动收起侧栏，避免遮罩挡住输入框
             cleanup();
         };
 
@@ -2590,6 +2612,7 @@ ${chunkText}
             settings.chatProviderId = e.target.value;
             saveAll();
             renderProviderList();
+            updateContextUsage();
             showToast('已切换聊天接口', 'success', 1500);
         });
         $('#provider-add').addEventListener('click', () => openProviderEditor(null));
