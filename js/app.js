@@ -1710,19 +1710,7 @@
         window.addEventListener('resize', applyHeight);
         window.addEventListener('orientationchange', () => setTimeout(applyHeight, 150));
 
-        // 视口比例变了，玻璃纹理要按新尺寸重新生成（纹理是按视口比例裁的）
-        let glassResizeTimer = null;
-        const rebuildGlass = () => {
-            clearTimeout(glassResizeTimer);
-            glassResizeTimer = setTimeout(() => {
-                const prev = glassTexUrl;
-                glassTexUrl = '';
-                glassTexTask = null;
-                buildGlassTexture().catch(() => { if (prev) document.documentElement.style.setProperty('--glass-tex', 'url("' + prev + '")'); });
-            }, 500);
-        };
-        window.addEventListener('orientationchange', rebuildGlass);
-        if (window.visualViewport) window.visualViewport.addEventListener('resize', rebuildGlass);
+
 
         // 键盘收起/弹起后，把视图拉回底部，避免停在半空
         const relayout = () => setTimeout(() => { applyHeight(); if (isNearBottom) scrollToBottom(true); }, 60);
@@ -2643,47 +2631,27 @@ ${chunkText}
                 if (img.decode) await img.decode();
                 else await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
 
-                const vw = window.innerWidth || 390;
-                const vh = window.innerHeight || 844;
-                const S = 0.34;
-                const W = Math.max(160, Math.round(vw * S));
-                const H = Math.max(160, Math.round(vh * S));
-                const c = document.createElement('canvas');
-                c.width = W; c.height = H;
-                const g = c.getContext('2d');
-                if (!g) throw new Error('no 2d ctx');
+                // 缩到 16x16 再放大 => 天然的柔和色块，和壁纸色调一致但不含任何位置信息
+                const tiny = document.createElement('canvas');
+                tiny.width = 16; tiny.height = 16;
+                const tt = tiny.getContext('2d');
+                tt.drawImage(img, 0, 0, 16, 16);
 
-                const iw = img.naturalWidth || img.width;
-                const ih = img.naturalHeight || img.height;
-                const ir = iw / ih;
-                const cr = W / H;
-                let dw, dh;
-                if (ir > cr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
-                const dx = (W - dw) / 2;
-                const dy = (H - dh) / 2;
+                const T = 128;
+                const tile = document.createElement('canvas');
+                tile.width = T; tile.height = T;
+                const tg = tile.getContext('2d');
+                tg.imageSmoothingEnabled = true;
+                tg.imageSmoothingQuality = 'high';
+                tg.drawImage(tiny, 0, 0, T, T);
 
-                // 先铺一层清晰底，防止模糊把边缘刷成透明
-                g.drawImage(img, dx, dy, dw, dh);
+                // 做成半透明，底下的白纱/蓝纱能透上来
+                tg.globalCompositeOperation = 'destination-in';
+                tg.fillStyle = 'rgba(0,0,0,0.34)';
+                tg.fillRect(0, 0, T, T);
+                tg.globalCompositeOperation = 'source-over';
 
-                const userBlur = Math.min(20, Math.max(0, Number(settings.backgroundBlur) || 0));
-                const blurPx = Math.max(3, (userBlur + 16) * S);
-                const bright = Math.min(1.5, Math.max(0.3, (Number(settings.backgroundBrightness) || 100) / 100));
-                if ('filter' in g) {
-                    g.filter = 'blur(' + blurPx.toFixed(2) + 'px) saturate(1.9) brightness(' + bright.toFixed(2) + ')';
-                    const pad = Math.max(4, Math.round(W * 0.03));
-                    g.drawImage(img, dx - pad, dy - pad, dw + pad * 2, dh + pad * 2);
-                    g.filter = 'none';
-                }
-
-                // 整张纹理做成半透明（destination-in 乘 alpha），
-                // 这样气泡底下的 background-color 能透上来，保留通透的玻璃感。
-                g.globalCompositeOperation = 'destination-in';
-                g.fillStyle = 'rgba(0,0,0,0.46)';
-                g.fillRect(0, 0, W, H);
-                g.globalCompositeOperation = 'source-over';
-
-                glassTexUrl = c.toDataURL('image/png');
-                // 预热一次，避免首个气泡用到时才开始解码
+                glassTexUrl = tile.toDataURL('image/png');
                 const warm = new Image();
                 warm.src = glassTexUrl;
                 if (warm.decode) warm.decode().catch(() => {});
