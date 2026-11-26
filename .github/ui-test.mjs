@@ -84,7 +84,9 @@ const order = await page.evaluate(() => {
     const titles = [...document.querySelectorAll('.settings-section .section-title')].map(e => e.textContent.trim());
     return titles;
 });
-ok('上下文区块紧跟聊天服务', order.indexOf('上下文与模式') === order.indexOf('聊天服务') + 1, JSON.stringify(order));
+ok('上下文区块在聊天/生图之后、提示词之前',
+    order.indexOf('上下文与模式') > order.indexOf('聊天服务') && order.indexOf('上下文与模式') < order.indexOf('系统提示词'),
+    JSON.stringify(order));
 await page.evaluate(() => { document.querySelector('#settings-panel .settings-body').scrollTop = 99999; });
 await page.waitForTimeout(300);
 await page.screenshot({ path: path.join(OUT, '04-settings-bottom.png') });
@@ -92,7 +94,7 @@ await page.click('#close-settings');
 await page.waitForTimeout(300);
 
 // ---------- 4. 普通模式对话 ----------
-await page.evaluate(() => { document.querySelector('#chat-input').value = '你好呀'; });
+await page.evaluate(() => { window.__canned = '这是普通模式的一条完整回复，不应该被拆开。'; });
 await page.evaluate(() => {
     const el = document.querySelector('#chat-input');
     el.value = '你好呀';
@@ -130,6 +132,7 @@ await page.screenshot({ path: path.join(OUT, '06-timestamp.png') });
 await page.evaluate(() => { localStorage.removeItem('aichat_meta_v3'); });
 await page.reload({ waitUntil: 'networkidle' });
 await page.waitForTimeout(800);
+await page.evaluate(() => { window.__canned = '第一条消息 ||| 第二条消息 ||| 第三条消息'; });
 await page.click('#mode-btn');
 await page.waitForTimeout(300);
 const modeLabel = await page.textContent('#mode-label');
@@ -147,6 +150,25 @@ const wfRows = await page.locator('.msg-row.assistant').count();
 ok('waifu 模式拆成多条气泡', wfRows >= 2, `rows=${wfRows}`);
 const wfTexts = await page.locator('.msg-row.assistant .bubble-content').allTextContents();
 ok('waifu 气泡内容正确', wfTexts.some(t => t.includes('第一条消息')), JSON.stringify(wfTexts));
+
+// ---------- 5.5 waifu 下生图顺序 ----------
+await page.evaluate(() => { window.__canned = '给你拍一张 ||| <genimg prompt="a girl taking a selfie, natural light" /> ||| 好看吗'; });
+await page.evaluate(() => {
+    const el = document.querySelector('#chat-input');
+    el.value = '来张自拍';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.evaluate(() => document.querySelector('#send-btn').click());
+await page.waitForTimeout(14000);
+const orderRows = await page.evaluate(() => [...document.querySelectorAll('.msg-row')].map(r => ({
+    img: !!r.querySelector('.msg-image'),
+    failed: (r.textContent || '').includes('生图失败'),
+    text: (r.querySelector('.bubble-content') || {}).textContent || ''
+})));
+const imgIdx = orderRows.findIndex(r => r.img);
+ok('waifu 生成了图片', imgIdx >= 0, JSON.stringify(orderRows.map(r => (r.img ? '[IMG]' : r.text.slice(0, 8)))));
+ok('图片插在两条消息之间而不是最下方', imgIdx >= 0 && imgIdx < orderRows.length - 1, `imgIdx=${imgIdx} total=${orderRows.length}`);
+await page.screenshot({ path: path.join(OUT, '07b-waifu-image.png') });
 
 // ---------- 6. 多会话与刷新 ----------
 await page.evaluate(() => document.querySelector('#menu-btn').click());
