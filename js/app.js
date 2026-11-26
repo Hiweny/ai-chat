@@ -9,6 +9,10 @@
     // ========== 配置 ==========
     const API_URL = 'https://free-api.cnmwx.com/v1/completions';
     const REQUEST_TIMEOUT = 45000;
+    const SUMMARY_TIMEOUT = 150000;
+    const API_MAX_BYTES = 262144; // 接口请求体硬上限 256KB
+    const MAX_PROMPT_CHARS = 80000; // 中文按 3 字节/字折算，留出 JSON 转义余量
+    const SUMMARY_CHUNK_CHARS = 18000; // 单次总结的分块大小
     const STORAGE_KEY = 'aichat_v2';
     const DOM_CLEANUP_THRESHOLD = 200; // 消息数量阈值，超过后清理旧DOM
     const RAF_THROTTLE_MS = 32; // ~30fps 流式渲染节流
@@ -41,8 +45,11 @@
     let aiProfile = { avatar: '' };
 
     let settings = {
-        maxPromptLength: 3000,
-        recentRounds: 8,
+        maxPromptLength: 80000,
+        warnThreshold: 56000,
+        recentRounds: 10,
+        autoCompact: true,
+        systemPrompt: '',
         bubbleStyle: 'modern',
         backgroundImage: '',
         backgroundBlur: 0,
@@ -170,13 +177,18 @@
         try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
         } catch (e) {
-            const keys = Object.keys(conversations);
-            if (keys.length > 10) {
-                const sorted = keys.sort((a, b) => conversations[b].updatedAt - conversations[a].updatedAt);
-                for (let i = 5; i < sorted.length; i++) {
-                    delete conversations[sorted[i]];
+            // 空间不足：砍掉较旧的一半对话后再写一次（不递归调用，避免死循环）
+            const keys = Object.keys(conversations).sort((a, b) => conversations[b].updatedAt - conversations[a].updatedAt);
+            if (keys.length > 3) {
+                for (let i = Math.floor(keys.length / 2); i < keys.length; i++) delete conversations[keys[i]];
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                    showToast('存储空间不足，已自动清理部分旧对话', 'warning');
+                } catch (e2) {
+                    showToast('存储空间不足，保存失败', 'error');
                 }
-                try { saveAll(); } catch (e2) { showToast('存储空间不足，已自动清理旧对话', 'warning'); }
+            } else {
+                showToast('存储空间不足，保存失败', 'error');
             }
         }
     }
@@ -222,18 +234,50 @@
     }
 
     // ========== 构建 prompt ==========
+    // 结构：系统设定 → 历史摘要（压缩产物，永远置顶）→ 当前时间 → 最近 N 轮原文 → 本轮输入
+    // 关键：本轮用户消息在调用前已经 push 进 messages，必须排除末尾那条，
+    // 否则同一条用户消息会在 prompt 里出现两次（这就是"消息连发两次"的根因）
     function buildPrompt(userMsg) {
         const parts = [];
-        parts.push(`[当前时间: ${getTimeString()}]`);
+        const sys = (settings.systemPrompt || '').trim();
+        if (sys) parts.push(`【系统设定】\n${sys}\n【系统设定结束】`);
+
         const summary = getSummary();
-        if (summary.trim()) parts.push(`[对话历史摘要]\n${summary}`);
-        const msgs = getMessages().slice(-settings.recentRounds * 2);
+        if (summary && summary.trim()) {
+            parts.push(`【历史摘要】\n${summary.trim()}\n【摘要结束】`);
+        }
+        parts.push(`[当前时间: ${getTimeString()}]`);
+
+        let msgs = getMessages().slice();
+        if (userMsg && msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
+            msgs = msgs.slice(0, -1);
+        }
+        msgs = msgs.slice(-settings.recentRounds * 2);
         for (const m of msgs) {
             parts.push(m.role === 'user' ? `Human: ${m.content}` : `AI: ${m.content}`);
         }
-        parts.push(`Human: ${userMsg}`);
-        parts.push('AI:');
+        if (userMsg) {
+            parts.push(`Human: ${userMsg}`);
+            parts.push('AI:');
+        }
         return parts.join('\n');
+    }
+
+    // 兜底：万一压缩后仍超长（例如单轮内容本身极长），保留头尾、省略中段，
+    // 保证请求体不会撞上接口 256KB 的 413
+    function fitPrompt(prompt) {
+        if (prompt.length <= MAX_PROMPT_CHARS) return prompt;
+        const headLen = Math.floor(MAX_PROMPT_CHARS * 0.34);
+        const tailLen = MAX_PROMPT_CHARS - headLen - 40;
+        return prompt.slice(0, headLen)
+            + '\n...[中间内容过长，已省略]...\n'
+            + prompt.slice(-tailLen);
+    }
+
+    // UTF-8 字节数：接口 256KB 限制卡的是字节，不是字符
+    function utf8Bytes(str) {
+        try { return new TextEncoder().encode(str).length; }
+        catch (e) { return str.length * 3; }
     }
 
     // ========== Markdown 渲染 ==========
@@ -484,7 +528,7 @@
     async function sendForRegenerate(userMsg) {
         if (isGenerating) return;
 
-        const prompt = buildPrompt(userMsg);
+        const prompt = fitPrompt(buildPrompt(userMsg));
 
         // 创建AI气泡 - 修复：aiRow 已有 position:relative
         const aiRow = document.createElement('div');
@@ -615,11 +659,18 @@
             updateChatTitle();
         }
 
-        // 上下文长度检查
-        const prompt = buildPrompt(userMsg);
-        if (prompt.length > settings.maxPromptLength) {
-            renderSystemMessage(`\u26a0\ufe0f 上下文较长 (${prompt.length}字符)，建议手动总结`);
+        // 上下文检查：超提醒阈值只提示；超上限且开启自动压缩则先压缩旧消息再发
+        let prompt = buildPrompt(userMsg);
+        const warnAt = settings.warnThreshold || Math.round(settings.maxPromptLength * 0.7);
+        if (settings.autoCompact && prompt.length > settings.maxPromptLength) {
+            renderSystemMessage(`\u26a0\ufe0f 上下文已达 ${prompt.length} 字符，正在自动压缩旧消息...`);
+            const ok = await compactConversation({ manual: false, silent: false });
+            if (ok) prompt = buildPrompt(userMsg);
+        } else if (prompt.length > warnAt) {
+            renderSystemMessage(`\u2139\ufe0f 上下文较长（${prompt.length} 字符），可点顶栏压缩按钮整理记忆`);
         }
+
+        prompt = fitPrompt(prompt);
 
         // 创建AI气泡
         const aiRow = document.createElement('div');
@@ -778,9 +829,10 @@
 
         closeEditDialog();
 
-        // 重建UI并发送
+        // 重建UI后基于已存在的用户消息重新生成
+        // 注意：这里不能再用 sendMessage，否则会再 push 一条相同消息，出现"连发两次"
         rebuildMessagesUI();
-        sendMessage(newContent);
+        sendForRegenerate(newContent);
     }
 
     // ========== 消息搜索 ==========
@@ -925,6 +977,31 @@
         }
     }
 
+    // ========== 移动端视口适配 ==========
+    // 用 visualViewport 的真实高度驱动 #app 高度：键盘弹起时布局跟着缩，
+    // 输入框不会被键盘或浏览器底部导航栏挡在屏幕外
+    function setupViewportFit() {
+        const root = document.documentElement;
+        const applyHeight = () => {
+            const vv = window.visualViewport;
+            const h = vv ? vv.height : window.innerHeight;
+            if (h > 0) root.style.setProperty('--app-height', Math.round(h) + 'px');
+        };
+        applyHeight();
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', applyHeight);
+            window.visualViewport.addEventListener('scroll', applyHeight);
+        }
+        window.addEventListener('resize', applyHeight);
+        window.addEventListener('orientationchange', () => setTimeout(applyHeight, 150));
+
+        // 键盘收起/弹起后，把视图拉回底部，避免停在半空
+        const relayout = () => setTimeout(() => { applyHeight(); if (isNearBottom) scrollToBottom(true); }, 60);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', relayout);
+        window.addEventListener('resize', relayout);
+    }
+
     // ========== 网络状态检测 ==========
     function updateNetworkStatus() {
         if (networkStatus) {
@@ -932,46 +1009,39 @@
         }
     }
 
-    // ========== 手动总结 ==========
-    async function manualSummary() {
-        if (isGenerating) return;
-        const conv = currentConv();
-        if (!conv || (conv.messages.length === 0 && !conv.summary)) {
-            showToast('当前没有对话可总结', 'warning');
-            return;
-        }
-        if (!confirm('将总结当前全部对话并清空历史，之后对话会基于摘要继续。确定吗？')) return;
+    // ========== 对话压缩（滚动摘要） ==========
+    const SUMMARY_INSTRUCTION = `你是一个对话记忆压缩器。请把给定的对话记录压缩成一份"记忆快照"，供后续对话直接当作上下文使用。
 
-        let conversationText = '';
-        if (conv.summary && conv.summary.trim()) {
-            conversationText += `[现有摘要]\n${conv.summary}\n\n[新增对话]\n`;
-        }
-        for (const m of conv.messages) {
-            conversationText += (m.role === 'user' ? 'User: ' : 'AI: ') + m.content + '\n';
-        }
+写作要求：
+1. 只保留对后续对话有用的信息：用户的目标与诉求、已确认的事实与数据、做出的决定、约定的规则/格式/称呼、代码或文件的要点、尚未解决的问题、用户明确表达的偏好与禁忌。
+2. 用简体中文分条列写，每条一句话；能带上具体名字、数字、路径、参数就带上，不要写成空泛的套话。
+3. 如果提供了【已有摘要】，请把它和新对话合并成一份更新的摘要：旧信息仍然有效就保留，被推翻就替换，重复的合并，不要出现"之前提到过"这类指代。
+4. 不要编造对话里没有的内容，不要添加评论、评价或建议。
+5. 总长度控制在 1200 字以内。
 
-        const summarizePrompt = `请你作为对话记忆助手，将以下对话内容总结为一份结构清晰、信息完整的摘要。摘要需包含：
-1. 用户的核心需求或讨论主题。
-2. 对话中的关键事实、决定或结论。
-3. 任何需要记住的细节或偏好。
-请使用自然段落描述，确保摘要足以让后续对话无缝衔接，不丢失重要信息。不要添加额外评论，直接输出摘要内容。
+只输出摘要正文，不要任何前言或结尾。`;
 
-对话内容：
-${conversationText}
+    async function requestSummary(existing, chunkText) {
+        const prompt = `${SUMMARY_INSTRUCTION}
 
-摘要：`;
+【已有摘要】
+${existing || '（无）'}
 
-        renderSystemMessage('\ud83d\udcdd 正在生成对话摘要...');
-        isGenerating = true;
-        updateInputState();
+【新增对话】
+${chunkText}
 
+【更新后的摘要】`;
+
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), SUMMARY_TIMEOUT);
         try {
             const resp = await fetch(API_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: summarizePrompt }),
+                body: JSON.stringify({ prompt }),
+                signal: ctrl.signal,
             });
-            if (!resp.ok) throw new Error('总结请求失败');
+            if (!resp.ok) throw new Error(`总结请求失败 HTTP ${resp.status}`);
             const reader = resp.body.getReader();
             let text = '';
             while (true) {
@@ -979,24 +1049,74 @@ ${conversationText}
                 if (done) break;
                 text += new TextDecoder().decode(value);
             }
-            const finalSummary = filterAd(text.trim());
-            conv.summary = finalSummary;
-            conv.messages = [];
-            clearMessagesUI();
-            renderSystemMessage('\ud83d\udce6 对话已总结，记忆已重置');
-            renderSystemMessage(`"${finalSummary.slice(0, 100)}${finalSummary.length > 100 ? '...' : ''}"`);
+            return filterAd(text).trim();
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    // 把「保留轮数」之外的消息压缩成摘要，保留轮数内原样不动
+    async function compactConversation(options = {}) {
+        const { manual = true, silent = false } = options;
+        if (isGenerating) return false;
+        const conv = currentConv();
+        if (!conv) { if (manual) showToast('当前没有对话可压缩', 'warning'); return false; }
+
+        const keepRounds = Math.max(1, parseInt(settings.recentRounds, 10) || 10);
+        const keepCount = keepRounds * 2;
+        const total = conv.messages.length;
+        const keep = total > keepCount ? conv.messages.slice(total - keepCount) : conv.messages.slice();
+        const toCompress = total > keepCount ? conv.messages.slice(0, total - keepCount) : [];
+
+        if (toCompress.length === 0) {
+            if (manual) showToast(`对话不足 ${keepRounds} 轮，暂时不需要压缩`, 'info');
+            return false;
+        }
+        if (manual && !confirm(`将把前面 ${toCompress.length} 条消息压缩为摘要，最近 ${keepRounds} 轮保持原文。确定吗？`)) return false;
+
+        // 分块，避免单次请求超过接口 256KB 上限
+        const chunks = [];
+        let cur = '', curLen = 0;
+        for (const m of toCompress) {
+            const line = (m.role === 'user' ? '用户：' : 'AI：') + m.content + '\n';
+            if (curLen + line.length > SUMMARY_CHUNK_CHARS && cur) { chunks.push(cur); cur = ''; curLen = 0; }
+            cur += line; curLen += line.length;
+        }
+        if (cur) chunks.push(cur);
+
+        isGenerating = true;
+        updateInputState();
+        if (!silent) renderSystemMessage('\u{1F4DD} 正在压缩对话记忆...');
+
+        try {
+            let summary = conv.summary || '';
+            for (let i = 0; i < chunks.length; i++) {
+                if (chunks.length > 1 && !silent) renderSystemMessage(`\u{1F4DD} 压缩中 ${i + 1}/${chunks.length}...`);
+                summary = await requestSummary(summary, chunks[i]);
+            }
+            if (!summary) throw new Error('摘要为空');
+
+            conv.summary = summary;
+            conv.compressedCount = (conv.compressedCount || 0) + toCompress.length;
+            conv.messages = keep;
+            conv.updatedAt = Date.now();
             saveAll();
-            updateContextUsage();
+            rebuildMessagesUI();
             updateStats();
-            showToast('对话总结完成', 'success');
+            if (!silent) showToast('对话已压缩，摘要已置顶', 'success');
+            return true;
         } catch (e) {
-            console.error('总结失败', e);
-            renderSystemMessage('\u26a0\ufe0f 总结失败，请重试');
+            console.error('压缩失败', e);
+            if (!silent) renderSystemMessage('\u26A0\ufe0F 压缩失败：' + (e.message || '请重试'));
+            return false;
         } finally {
             isGenerating = false;
             updateInputState();
         }
     }
+
+    // 顶栏按钮 / Ctrl+Shift+S 入口
+    function manualSummary() { return compactConversation({ manual: true }); }
 
     // ========== 对话管理 ==========
     function createConversation(title, focusInput = true) {
@@ -1130,11 +1250,35 @@ ${conversationText}
             showWelcome();
         } else {
             hideWelcome();
-            if (getSummary()) renderSystemMessage(`\ud83d\udce6 历史摘要：${getSummary().slice(0, 80)}...`);
+            if (getSummary()) renderSummaryBlock(getSummary(), currentConv() ? currentConv().compressedCount : 0);
             msgs.forEach(m => renderMessage(m, false, true));
             scrollToBottom(true);
         }
         updateContextUsage();
+    }
+
+    // 摘要块：完整内容置顶展示，可折叠
+    function renderSummaryBlock(summary, compressedCount) {
+        hideWelcome();
+        const row = document.createElement('div');
+        row.className = 'summary-row';
+
+        const box = document.createElement('details');
+        box.className = 'summary-box';
+        box.open = true;
+
+        const head = document.createElement('summary');
+        head.className = 'summary-head';
+        head.textContent = `\u{1F4E6} 历史记忆` + (compressedCount ? `（已压缩 ${compressedCount} 条旧消息）` : '');
+
+        const body = document.createElement('div');
+        body.className = 'summary-body';
+        body.textContent = summary;
+
+        box.appendChild(head);
+        box.appendChild(body);
+        row.appendChild(box);
+        messagesContainer.appendChild(row);
     }
 
     function updateChatTitle() {
@@ -1228,10 +1372,14 @@ ${conversationText}
     function updateContextUsage() {
         const el = $('#context-usage');
         if (!el) return;
-        const len = buildPrompt('').length;
-        const pct = Math.min(100, Math.round((len / settings.maxPromptLength) * 100));
-        el.textContent = `上下文用量：${len}/${settings.maxPromptLength} 字符 (${pct}%)`;
-        el.className = pct > 80 ? 'context-usage warning' : 'context-usage';
+        const prompt = buildPrompt('');
+        const len = prompt.length;
+        const bytes = utf8Bytes(prompt);
+        const limit = settings.maxPromptLength || MAX_PROMPT_CHARS;
+        const warnAt = settings.warnThreshold || Math.round(limit * 0.7);
+        const pct = Math.min(100, Math.round((len / limit) * 100));
+        el.textContent = `上下文：${len} 字符 / ${(bytes / 1024).toFixed(1)} KB（${pct}%；接口硬上限 256 KB ≈ 8.4 万字符）`;
+        el.className = (len > warnAt || pct > 85) ? 'context-usage warning' : 'context-usage';
     }
 
     function updateCharCount() {
@@ -1267,7 +1415,12 @@ ${conversationText}
         $('#set-blur').value = settings.backgroundBlur;
         $('#set-opacity').value = settings.backgroundOpacity;
         $('#set-maxlen').value = settings.maxPromptLength;
+        $('#set-warn').value = settings.warnThreshold;
         $('#set-rounds').value = settings.recentRounds;
+        $('#set-autocompact').checked = !!settings.autoCompact;
+        $('#set-systemprompt').value = settings.systemPrompt || '';
+        const spStatus = $('#systemprompt-status');
+        if (spStatus) spStatus.textContent = '';
         $('#blur-val').textContent = settings.backgroundBlur;
         $('#opacity-val').textContent = Math.round(settings.backgroundOpacity * 100);
         updateContextUsage();
@@ -1280,8 +1433,11 @@ ${conversationText}
         settings.backgroundImage = $('#set-bgurl').value.trim();
         settings.backgroundBlur = parseFloat($('#set-blur').value) || 0;
         settings.backgroundOpacity = parseFloat($('#set-opacity').value) || 0.85;
-        settings.maxPromptLength = parseInt($('#set-maxlen').value) || 3000;
-        settings.recentRounds = parseInt($('#set-rounds').value) || 8;
+        settings.maxPromptLength = Math.min(MAX_PROMPT_CHARS, Math.max(5000, parseInt($('#set-maxlen').value, 10) || 80000));
+        settings.warnThreshold = Math.min(settings.maxPromptLength, Math.max(1000, parseInt($('#set-warn').value, 10) || 56000));
+        settings.recentRounds = Math.min(50, Math.max(1, parseInt($('#set-rounds').value, 10) || 10));
+        settings.autoCompact = $('#set-autocompact').checked;
+        settings.systemPrompt = ($('#set-systemprompt').value || '').trim();
         userProfile.avatar = $('#set-useravatar').value.trim();
         aiProfile.avatar = $('#set-aiavatar').value.trim();
 
@@ -1432,14 +1588,6 @@ ${conversationText}
             showToast(`字符: ${len} | 预估 tokens: ~${tokens}`, 'info', 2000);
         });
 
-        // 欢迎提示卡片
-        $$('.hint-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const hint = card.getAttribute('data-hint');
-                if (hint) sendMessage(hint);
-            });
-        });
-
         // 滚动控制
         messagesContainer.addEventListener('scroll', () => {
             updateScrollButton();
@@ -1468,7 +1616,25 @@ ${conversationText}
         // 顶栏按钮
         $('#summary-btn').addEventListener('click', manualSummary);
         $('#fullscreen-btn').addEventListener('click', toggleFullscreen);
-        $('#export-btn-top').addEventListener('click', exportConversation);
+        $('#settings-top-btn').addEventListener('click', openSettings);
+
+        // 系统提示词：保存 / 清空
+        const persistSystemPrompt = (notify) => {
+            settings.systemPrompt = ($('#set-systemprompt').value || '').trim();
+            saveAll();
+            updateContextUsage();
+            const st = $('#systemprompt-status');
+            if (st && notify) {
+                st.textContent = '已保存';
+                setTimeout(() => { if (st) st.textContent = ''; }, 2000);
+            }
+        };
+        $('#save-systemprompt').addEventListener('click', () => persistSystemPrompt(true));
+        $('#clear-systemprompt').addEventListener('click', () => {
+            $('#set-systemprompt').value = '';
+            persistSystemPrompt(false);
+            showToast('系统提示词已清空', 'info');
+        });
 
         // 消息搜索
         $('#search-msg-btn').addEventListener('click', () => toggleMsgSearch(true));
@@ -1677,18 +1843,8 @@ ${conversationText}
         // 页面关闭前保存
         window.addEventListener('beforeunload', saveAll);
 
-        // 移动端键盘适配
-        if (window.visualViewport) {
-            const viewport = window.visualViewport;
-            const inputArea = $('#input-area');
-            viewport.addEventListener('resize', () => {
-                if (document.activeElement === chatInput && viewport.height < window.innerHeight * 0.8) {
-                    inputArea.style.paddingBottom = '8px';
-                } else {
-                    inputArea.style.paddingBottom = '';
-                }
-            });
-        }
+        // 移动端视口适配（地址栏 / 底部导航栏 / 软键盘）
+        setupViewportFit();
     }
 
     // ========== 初始化 ==========
