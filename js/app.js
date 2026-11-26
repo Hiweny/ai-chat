@@ -1362,8 +1362,9 @@
             content.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
             scrollToBottom();
 
-            // 模拟打字：字数越多"正在输入"越久
-            await sleep(480 + Math.min(1500, raw.length * 26) + Math.random() * 320);
+            // 模拟打字：短句手快，长句要慢慢敲，再抖一点
+            const typeMs = 170 + Math.min(1900, raw.length * 19) + Math.random() * 280;
+            await sleep(typeMs);
             if (waifu.interrupted) {
                 row.remove();
                 waifu.remainder = parts.slice(i).join(' ');
@@ -1395,7 +1396,11 @@
                 }
             }
 
-            if (i < parts.length - 1) await sleep(240 + Math.random() * 380);
+            // 条与条之间：多数停一会儿，偶尔急促连发
+            if (i < parts.length - 1) {
+                const r = Math.random();
+                await sleep(r < 0.14 ? 140 + Math.random() * 160 : 520 + Math.random() * 900);
+            }
         }
 
         waifu.playing = false;
@@ -1419,6 +1424,11 @@
         waifu.interrupted = false;
         updateInputState();
         abortController = new AbortController();
+
+        // 真人节奏：先"看完你说的话"再开始打字，长消息看得更久
+        const readMs = 420 + Math.min(900, String(last.content || '').length * 8) + Math.random() * 520;
+        await sleep(readMs);
+        if (waifu.interrupted) { isGenerating = false; abortController = null; updateInputState(); return; }
 
         const typing = createBubbleRow();
         typing.content.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
@@ -1699,6 +1709,20 @@
         }
         window.addEventListener('resize', applyHeight);
         window.addEventListener('orientationchange', () => setTimeout(applyHeight, 150));
+
+        // 视口比例变了，玻璃纹理要按新尺寸重新生成（纹理是按视口比例裁的）
+        let glassResizeTimer = null;
+        const rebuildGlass = () => {
+            clearTimeout(glassResizeTimer);
+            glassResizeTimer = setTimeout(() => {
+                const prev = glassTexUrl;
+                glassTexUrl = '';
+                glassTexTask = null;
+                buildGlassTexture().catch(() => { if (prev) document.documentElement.style.setProperty('--glass-tex', 'url("' + prev + '")'); });
+            }, 500);
+        };
+        window.addEventListener('orientationchange', rebuildGlass);
+        if (window.visualViewport) window.visualViewport.addEventListener('resize', rebuildGlass);
 
         // 键盘收起/弹起后，把视图拉回底部，避免停在半空
         const relayout = () => setTimeout(() => { applyHeight(); if (isNearBottom) scrollToBottom(true); }, 60);
@@ -2469,6 +2493,9 @@ ${chunkText}
 
     // ========== 模式切换 ==========
     function applyMode() {
+        // 让顶栏胶囊、输入框、侧栏跟着气泡样式走（毛玻璃 / 水玻璃 / 简约）
+        const preset = ['ios', 'water'].includes(settings.bubbleStyle) ? settings.bubbleStyle : 'plain';
+        document.documentElement.setAttribute('data-glass', preset);
         const wf = isWaifuMode();
         const label = $('#mode-label');
         if (label) label.textContent = wf ? 'WA' : 'AI';
@@ -2579,6 +2606,86 @@ ${chunkText}
             : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
     }
 
+    // ========== 预模糊玻璃纹理 ==========
+    // 气泡不挂 backdrop-filter：元素一多 Chromium 会降级，滚动/出现时还会闪。
+    // 改成启动时把壁纸模糊一次存成 dataURL，气泡用 background-attachment:fixed 取用，
+    // 位置与背后的 #bg-layer 严格对齐 —— 视觉等于毛玻璃，成本约等于零。
+    let glassTexUrl = '';
+    let glassTexTask = null;
+
+    function isDarkNow() {
+        return settings.colorScheme === 'dark' ||
+            (settings.colorScheme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+
+    function buildGlassTexture() {
+        const root = document.documentElement;
+        const url = String(settings.backgroundImage || '').trim();
+        if (!url) { root.style.removeProperty('--glass-tex'); return Promise.resolve(); }
+        if (glassTexTask) return glassTexTask;
+
+        glassTexTask = (async () => {
+            try {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.decoding = 'async';
+                img.src = url;
+                if (img.decode) await img.decode();
+                else await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+
+                const vw = window.innerWidth || 390;
+                const vh = window.innerHeight || 844;
+                const S = 0.34;
+                const W = Math.max(160, Math.round(vw * S));
+                const H = Math.max(160, Math.round(vh * S));
+                const c = document.createElement('canvas');
+                c.width = W; c.height = H;
+                const g = c.getContext('2d');
+                if (!g) throw new Error('no 2d ctx');
+
+                const iw = img.naturalWidth || img.width;
+                const ih = img.naturalHeight || img.height;
+                const ir = iw / ih;
+                const cr = W / H;
+                let dw, dh;
+                if (ir > cr) { dh = H; dw = H * ir; } else { dw = W; dh = W / ir; }
+                const dx = (W - dw) / 2;
+                const dy = (H - dh) / 2;
+
+                // 先铺一层清晰底，防止模糊把边缘刷成透明
+                g.drawImage(img, dx, dy, dw, dh);
+
+                const userBlur = Math.min(20, Math.max(0, Number(settings.backgroundBlur) || 0));
+                const blurPx = Math.max(3, (userBlur + 16) * S);
+                const bright = Math.min(1.5, Math.max(0.3, (Number(settings.backgroundBrightness) || 100) / 100));
+                if ('filter' in g) {
+                    g.filter = 'blur(' + blurPx.toFixed(2) + 'px) saturate(1.9) brightness(' + bright.toFixed(2) + ')';
+                    const pad = Math.max(4, Math.round(W * 0.03));
+                    g.drawImage(img, dx - pad, dy - pad, dw + pad * 2, dh + pad * 2);
+                    g.filter = 'none';
+                }
+
+                // 整张纹理做成半透明（destination-in 乘 alpha），
+                // 这样气泡底下的 background-color 能透上来，保留通透的玻璃感。
+                g.globalCompositeOperation = 'destination-in';
+                g.fillStyle = 'rgba(0,0,0,0.66)';
+                g.fillRect(0, 0, W, H);
+                g.globalCompositeOperation = 'source-over';
+
+                glassTexUrl = c.toDataURL('image/png');
+                root.style.setProperty('--glass-tex', 'url("' + glassTexUrl + '")');
+                root.setAttribute('data-glass-ready', '');
+            } catch (e) {
+                console.warn('玻璃纹理生成失败，回退纯色玻璃', e);
+                glassTexUrl = '';
+                document.documentElement.style.removeProperty('--glass-tex');
+            } finally {
+                glassTexTask = null;
+            }
+        })();
+        return glassTexTask;
+    }
+
     function applyBackground() {
         const bgLayer = $('#bg-layer');
         const bgMask = $('#bg-mask');
@@ -2594,12 +2701,13 @@ ${chunkText}
             bgLayer.style.display = 'none';
         }
 
-        const isDark = settings.colorScheme === 'dark' ||
-            (settings.colorScheme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        const isDark = isDarkNow();
         // 固定一层很淡的底色保证文字可读，不再用它控制"透明度"
         bgMask.style.background = settings.backgroundImage
             ? `rgba(${isDark ? '20,20,24' : '250,249,246'},${isDark ? 0.18 : 0.10})`
             : `rgba(${isDark ? '26,26,30' : '248,247,244'},1)`;
+
+        buildGlassTexture();
     }
 
     function toggleFullscreen() {
