@@ -2398,3 +2398,21 @@ select:focus:not(:focus-visible) {
 @media (max-width: 768px) {
     .image-msg { max-width: 82%; }
 }
+
+/* 侧栏操作按钮：固定宽度、右对齐，条目之间不会错位 */
+.chat-list-item .item-actions {
+    width: 54px;
+    justify-content: flex-end;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.chat-list-item .item-action-btn {
+    width: 24px;
+    height: 24px;
+    line-height: 1;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
