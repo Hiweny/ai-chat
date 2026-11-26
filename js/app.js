@@ -2493,9 +2493,19 @@ ${chunkText}
 
     // ========== 模式切换 ==========
     function applyMode() {
-        // 让顶栏胶囊、输入框、侧栏跟着气泡样式走（毛玻璃 / 水玻璃 / 简约）
+        // 顶栏胶囊、输入框、侧栏跟着气泡样式走：直接写 CSS 变量，避免选择器优先级问题
         const preset = ['ios', 'water'].includes(settings.bubbleStyle) ? settings.bubbleStyle : 'plain';
-        document.documentElement.setAttribute('data-glass', preset);
+        const rootEl = document.documentElement;
+        rootEl.setAttribute('data-glass', preset);
+        const dark = isDarkNow();
+        const tints = dark
+            ? { ios: 'rgba(48,48,54,0.56)', water: 'rgba(44,44,50,0.26)', plain: 'var(--bg-input)' }
+            : { ios: 'rgba(255,255,255,0.44)', water: 'rgba(255,255,255,0.16)', plain: 'var(--bg-input)' };
+        const edges = dark
+            ? { ios: 'rgba(255,255,255,0.12)', water: 'rgba(255,255,255,0.16)', plain: 'var(--border-color)' }
+            : { ios: 'rgba(255,255,255,0.68)', water: 'rgba(255,255,255,0.44)', plain: 'var(--border-color)' };
+        rootEl.style.setProperty('--glass-tint', tints[preset]);
+        rootEl.style.setProperty('--glass-edge-c', edges[preset]);
         const wf = isWaifuMode();
         const label = $('#mode-label');
         if (label) label.textContent = wf ? 'WA' : 'AI';
@@ -2668,11 +2678,15 @@ ${chunkText}
                 // 整张纹理做成半透明（destination-in 乘 alpha），
                 // 这样气泡底下的 background-color 能透上来，保留通透的玻璃感。
                 g.globalCompositeOperation = 'destination-in';
-                g.fillStyle = 'rgba(0,0,0,0.66)';
+                g.fillStyle = 'rgba(0,0,0,0.46)';
                 g.fillRect(0, 0, W, H);
                 g.globalCompositeOperation = 'source-over';
 
                 glassTexUrl = c.toDataURL('image/png');
+                // 预热一次，避免首个气泡用到时才开始解码
+                const warm = new Image();
+                warm.src = glassTexUrl;
+                if (warm.decode) warm.decode().catch(() => {});
                 root.style.setProperty('--glass-tex', 'url("' + glassTexUrl + '")');
                 root.setAttribute('data-glass-ready', '');
             } catch (e) {
