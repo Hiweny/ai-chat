@@ -32,6 +32,8 @@
         /https?:\/\/[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]{10,}/gi,
         /<(?:a|div|span|p|b|i|font|img|iframe)[^>]*>[\s\S]*?<\/\1>/gi,
         /<(?:br|hr)\s*\/?>/gi,
+        // 上游没有有效回答时的兜底文案
+        /【系统提示：暂无有效回答】/g,
     ];
 
     // ========== 状态 ==========
@@ -51,9 +53,18 @@
         autoCompact: true,
         systemPrompt: '',
         bubbleStyle: 'modern',
-        backgroundImage: '',
+        backgroundImage: 'https://t.alcy.cc/ycy',
         backgroundBlur: 0,
-        backgroundOpacity: 0.85,
+        backgroundOpacity: 0.75,
+        // 多供应商
+        chatProviderId: 'free',
+        providers: [],
+        imageProviderId: 'gitee',
+        imageProviders: [],
+        selfPortrait: '',
+        // Waifu 模式
+        waifuMode: false,
+        waifuMergeDelay: 1600,
         colorScheme: 'auto',
         showTimestamp: false,
     };
@@ -233,38 +244,267 @@
         if (statsMsgCount) statsMsgCount.textContent = `${msgCount} 条消息`;
     }
 
-    // ========== 构建 prompt ==========
-    // 结构：系统设定 → 历史摘要（压缩产物，永远置顶）→ 当前时间 → 最近 N 轮原文 → 本轮输入
-    // 关键：本轮用户消息在调用前已经 push 进 messages，必须排除末尾那条，
-    // 否则同一条用户消息会在 prompt 里出现两次（这就是"消息连发两次"的根因）
-    function buildPrompt(userMsg) {
+    // ========== 供应商（聊天 / 生图，可多套并存） ==========
+    const DEFAULT_PROVIDERS = [
+        { id: 'free', name: '公益接口（默认）', type: 'free', baseUrl: 'https://free-api.cnmwx.com/v1/completions', apiKey: '', model: '' }
+    ];
+    const DEFAULT_IMAGE_PROVIDERS = [
+        { id: 'gitee', name: 'Gitee AI（默认）', baseUrl: 'https://ai.gitee.com/v1', apiKey: 'KFMC4IBLB0V8LFYOWWVMERUJMQ29HNR3LJQSQTHN', model: 'z-image-turbo', size: '1024x1024' }
+    ];
+
+    function ensureProviders() {
+        if (!Array.isArray(settings.providers) || settings.providers.length === 0) {
+            settings.providers = JSON.parse(JSON.stringify(DEFAULT_PROVIDERS));
+        }
+        if (!Array.isArray(settings.imageProviders) || settings.imageProviders.length === 0) {
+            settings.imageProviders = JSON.parse(JSON.stringify(DEFAULT_IMAGE_PROVIDERS));
+        }
+        if (!settings.providers.some(x => x.id === settings.chatProviderId)) settings.chatProviderId = settings.providers[0].id;
+        if (!settings.imageProviders.some(x => x.id === settings.imageProviderId)) settings.imageProviderId = settings.imageProviders[0].id;
+    }
+
+    function currentProvider() {
+        ensureProviders();
+        return settings.providers.find(x => x.id === settings.chatProviderId) || settings.providers[0];
+    }
+
+    function currentImageProvider() {
+        ensureProviders();
+        return settings.imageProviders.find(x => x.id === settings.imageProviderId) || settings.imageProviders[0] || null;
+    }
+
+    // ========== 图片存储（IndexedDB，避免撑爆 localStorage） ==========
+    const IMG_DB = 'aichat_media';
+    const IMG_STORE = 'images';
+    let _imgDb = null;
+
+    function imgDb() {
+        if (_imgDb) return Promise.resolve(_imgDb);
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(IMG_DB, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(IMG_STORE)) db.createObjectStore(IMG_STORE, { keyPath: 'id' });
+            };
+            req.onsuccess = () => { _imgDb = req.result; resolve(_imgDb); };
+            req.onerror = () => reject(req.error);
+        });
+    }
+
+    function idbDo(mode, fn) {
+        return imgDb().then(db => new Promise((resolve, reject) => {
+            const tx = db.transaction(IMG_STORE, mode);
+            const r = fn(tx.objectStore(IMG_STORE));
+            tx.oncomplete = () => resolve(r && ('result' in r) ? r.result : undefined);
+            tx.onerror = () => reject(tx.error);
+        }));
+    }
+
+    const imgPut = (rec) => idbDo('readwrite', st => st.put(rec));
+    const imgGet = (id) => idbDo('readonly', st => st.get(id));
+    const imgDel = (id) => idbDo('readwrite', st => st.delete(id));
+    const imgAll = () => idbDo('readonly', st => st.getAll());
+    const imgClearAll = () => idbDo('readwrite', st => st.clear());
+
+    // ========== 时间与协议块 ==========
+    const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+    const waifu = { timer: null, remainder: '', interrupted: false, playing: false };
+
+    function nowBlock() {
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return `【现在】${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]} ${hh}:${mm}（UTC+8）
+这是本轮对话的真实时间。凡是涉及"今天、昨天、明天、刚才、上周、多久没聊、现在几点"这类相对时间，一律以它为唯一基准；不要用你训练数据里的日期，也不要反问用户今天几号。`;
+    }
+
+    const WAIFU_PROTOCOL = `【聊天方式：像真人一样发消息】
+你在用手机和对方聊天。一条回复可以拆成几条短消息依次发出，用 ||| 分隔（三个竖线）。
+- 大多数时候 1~2 条就够；只有情绪激动、连珠炮、想到什么补一句、或者要制造停顿感时，才拆成 3 条甚至更多。
+- 每条都口语化、简短，像随手打的字；不要写长段落，不要列点，不要编号，不要在开头复述对方的话。
+- 绝对不要用 ||| 做别的用途（不要用它分隔句子成分，不要写在代码里）。
+- 不要把格式规则说给用户听。`;
+
+    function imageProtocol() {
+        const portrait = (settings.selfPortrait || '').trim();
+        const base = `【生图能力】你可以生成图片。当用户想看照片、要自拍、要你"现在拍一张"、或者任何需要图像回应的场景，在文字之后另起一行输出：
+<genimg prompt="英文画面描述" />
+规则：
+- prompt 必须用英文，写清外貌、服装、表情、动作、环境、光线、镜头与风格（如 photorealistic, selfie, natural light, 35mm）。
+- 一次回复最多一个 <genimg>；如果只是想聊天，就不要调用。
+- 不要在正文里解释或提及这个标签，它会自动变成图片。`;
+        if (portrait) return base + `\n- 当画面里出现"你"本人时，外貌必须符合这个固定设定：${portrait}`;
+        return base + `\n- 当画面里出现"你"本人时，外貌请参考你在系统设定里的人设，保持前后一致。`;
+    }
+
+    function interruptBlock() {
+        if (!settings.waifuMode || !waifu.remainder) return '';
+        return `【刚才被打断】你上一条回复还没说完，就被对方的新消息打断了。你原本准备继续说的是：「${waifu.remainder.slice(0, 600)}」
+请自然地处理这次打断：可以接着往下说、可以改口、也可以先回应对方的新消息。不要机械复述被打断的内容，不要向用户解释"我被中断了"，也不要提"系统"或"协议"。`;
+    }
+
+    // ========== 构建上下文 ==========
+    function activeSystemPrompt(conv) {
+        const c = conv || currentConv();
+        const own = c && c.systemPrompt ? String(c.systemPrompt).trim() : '';
+        return own || (settings.systemPrompt || '').trim();
+    }
+
+    function msgText(m) {
+        if (!m) return '';
+        if (m.type === 'image') return `[图片：${m.prompt || '已生成的图片'}]`;
+        return m.content || '';
+    }
+
+    // 系统设定 → 现在 → 历史摘要 → waifu 协议 → 生图协议 → 打断说明
+    function headBlocks() {
         const parts = [];
-        const sys = (settings.systemPrompt || '').trim();
+        const sys = activeSystemPrompt();
         if (sys) parts.push(`【系统设定】\n${sys}\n【系统设定结束】`);
-
+        parts.push(nowBlock());
         const summary = getSummary();
-        if (summary && summary.trim()) {
-            parts.push(`【历史摘要】\n${summary.trim()}\n【摘要结束】`);
-        }
-        parts.push(`[当前时间: ${getTimeString()}]`);
+        if (summary.trim()) parts.push(`【历史摘要】\n${summary.trim()}\n【摘要结束】`);
+        if (settings.waifuMode) parts.push(WAIFU_PROTOCOL);
+        if (currentImageProvider()) parts.push(imageProtocol());
+        const ib = interruptBlock();
+        if (ib) parts.push(ib);
+        return parts.join('\n\n');
+    }
 
+    // 历史消息：排除本轮（已 push 的那条），只取最近 N 轮
+    function historyMsgs(userMsg) {
         let msgs = getMessages().slice();
-        if (userMsg && msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
-            msgs = msgs.slice(0, -1);
-        }
-        msgs = msgs.slice(-settings.recentRounds * 2);
-        for (const m of msgs) {
-            parts.push(m.role === 'user' ? `Human: ${m.content}` : `AI: ${m.content}`);
+        if (userMsg && msgs.length > 0 && msgs[msgs.length - 1].role === 'user') msgs = msgs.slice(0, -1);
+        return msgs.slice(-settings.recentRounds * 2);
+    }
+
+    function buildPrompt(userMsg) {
+        const parts = [headBlocks()];
+        for (const m of historyMsgs(userMsg)) {
+            parts.push((m.role === 'user' ? 'Human: ' : 'AI: ') + msgText(m));
         }
         if (userMsg) {
             parts.push(`Human: ${userMsg}`);
-            parts.push('AI:');
+            parts.push(`AI:`);
         }
         return parts.join('\n');
     }
 
-    // 兜底：万一压缩后仍超长（例如单轮内容本身极长），保留头尾、省略中段，
-    // 保证请求体不会撞上接口 256KB 的 413
+    // OpenAI 兼容接口用 messages 结构
+    function buildMessages(userMsg) {
+        const arr = [{ role: 'system', content: headBlocks() }];
+        for (const m of historyMsgs(userMsg)) {
+            arr.push({ role: m.role === 'user' ? 'user' : 'assistant', content: msgText(m) });
+        }
+        if (userMsg) arr.push({ role: 'user', content: userMsg });
+        return arr;
+    }
+
+    // ========== 统一调用层 ==========
+    async function callChat(opts) {
+        const { promptText, messages, onDelta, signal } = opts;
+        const p = currentProvider();
+
+        if (p.type === 'openai') {
+            const url = p.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+            const headers = { 'Content-Type': 'application/json' };
+            if (p.apiKey) headers['Authorization'] = 'Bearer ' + p.apiKey;
+            const resp = await fetch(url, {
+                method: 'POST', headers, signal,
+                body: JSON.stringify({ model: p.model || 'gpt-3.5-turbo', messages, stream: true }),
+            });
+            if (!resp.ok) {
+                const t = await resp.text().catch(() => '');
+                throw new Error(`HTTP ${resp.status} ${t.slice(0, 120)}`);
+            }
+            const ct = resp.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+                const j = await resp.json();
+                const c0 = j.choices && j.choices[0];
+                const txt = c0 && (c0.message ? c0.message.content : c0.text);
+                if (txt) onDelta(txt);
+                return;
+            }
+            const reader = resp.body.getReader();
+            const dec = new TextDecoder();
+            let buf = '';
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buf += dec.decode(value, { stream: true });
+                let idx;
+                while ((idx = buf.indexOf('\n')) >= 0) {
+                    const line = buf.slice(0, idx).trim();
+                    buf = buf.slice(idx + 1);
+                    if (!line.startsWith('data:')) continue;
+                    const data = line.slice(5).trim();
+                    if (data === '[DONE]') return;
+                    try {
+                        const j = JSON.parse(data);
+                        const c0 = j.choices && j.choices[0];
+                        const d = c0 && c0.delta ? c0.delta.content : null;
+                        if (d) onDelta(d);
+                    } catch (e) { /* 分片不完整，忽略 */ }
+                }
+            }
+            return;
+        }
+
+        const resp = await fetch(p.baseUrl || API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: promptText }),
+            signal,
+        });
+        if (!resp.ok) {
+            const t = await resp.text().catch(() => '');
+            throw new Error(`HTTP ${resp.status} ${t.slice(0, 120)}`);
+        }
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            onDelta(dec.decode(value, { stream: true }));
+        }
+    }
+
+    // ========== 生图 ==========
+    async function requestImage(promptText) {
+        const p = currentImageProvider();
+        if (!p) throw new Error('还没有配置生图服务');
+        const url = p.baseUrl.replace(/\/+$/, '') + '/images/generations';
+        const headers = { 'Content-Type': 'application/json' };
+        if (p.apiKey) headers['Authorization'] = 'Bearer ' + p.apiKey;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 180000);
+        try {
+            const resp = await fetch(url, {
+                method: 'POST', headers, signal: ctrl.signal,
+                body: JSON.stringify({
+                    model: p.model || 'z-image-turbo',
+                    prompt: promptText,
+                    size: p.size || '1024x1024',
+                    n: 1,
+                    response_format: 'b64_json',
+                }),
+            });
+            if (!resp.ok) {
+                const t = await resp.text().catch(() => '');
+                throw new Error(`生图失败 HTTP ${resp.status} ${t.slice(0, 120)}`);
+            }
+            const j = await resp.json();
+            const item = j.data && j.data[0];
+            if (!item) throw new Error('生图返回为空');
+            if (item.b64_json) return 'data:image/png;base64,' + item.b64_json;
+            if (item.url) return item.url;
+            throw new Error('生图返回格式不支持');
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    // 兜底：压缩后仍超长时保留头尾、省略中段，避免撞 256KB
     function fitPrompt(prompt) {
         if (prompt.length <= MAX_PROMPT_CHARS) return prompt;
         const headLen = Math.floor(MAX_PROMPT_CHARS * 0.34);
@@ -360,18 +600,45 @@
         const row = document.createElement('div');
         row.className = `msg-row ${msg.role}`;
         if (!animate) row.classList.add('no-anim');
-        // 存储消息引用用于右键菜单
         row.dataset.msgId = msg.id || '';
 
         const profile = msg.role === 'user' ? userProfile : aiProfile;
         row.innerHTML = getAvatarHTML(profile, msg.role);
 
+        const col = document.createElement('div');
+        col.className = 'bubble-col';
+
         const bubble = document.createElement('div');
         bubble.className = `bubble ${settings.bubbleStyle} ${msg.role}`;
-
         const contentDiv = document.createElement('div');
         contentDiv.className = 'bubble-content';
-        if (msg.role === 'user') {
+
+        if (msg.type === 'image') {
+            if (msg.imageInline) {
+                const img = document.createElement('img');
+                img.className = 'msg-image';
+                img.src = msg.imageInline;
+                img.alt = msg.prompt || '生成的图片';
+                img.addEventListener('click', () => openImageViewer(msg.imageInline));
+                contentDiv.appendChild(img);
+            } else {
+            contentDiv.innerHTML = '<div class="image-loading"><span class="dot-pulse"></span>加载图片…</div>';
+            imgGet(msg.imageId).then(rec => {
+                if (rec && rec.data) {
+                    contentDiv.innerHTML = '';
+                    const img = document.createElement('img');
+                    img.className = 'msg-image';
+                    img.src = rec.data;
+                    img.alt = msg.prompt || '生成的图片';
+                    img.dataset.imgId = msg.imageId;
+                    img.addEventListener('click', () => openImageViewer(rec.data));
+                    contentDiv.appendChild(img);
+                } else {
+                    contentDiv.textContent = '[图片已删除]';
+                }
+            }).catch(() => { contentDiv.textContent = '[图片读取失败]'; });
+            }
+        } else if (msg.role === 'user') {
             contentDiv.textContent = msg.content;
         } else {
             contentDiv.innerHTML = renderMarkdown(msg.content);
@@ -379,7 +646,28 @@
         }
         bubble.appendChild(contentDiv);
 
-        // 元信息行（时间戳 + token估算）
+        // 复制按钮
+        if (msg.type !== 'image') {
+            const copyBtn = document.createElement('button');
+            copyBtn.className = 'bubble-copy';
+            copyBtn.innerHTML = '\u{1f4cb}';
+            copyBtn.title = '复制';
+            copyBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const txt = msg.content || '';
+                navigator.clipboard.writeText(filterAd(txt)).then(() => {
+                    copyBtn.innerHTML = '\u2705';
+                    copyBtn.classList.add('copied');
+                    setTimeout(() => { copyBtn.innerHTML = '\u{1f4cb}'; copyBtn.classList.remove('copied'); }, 1500);
+                    showToast('已复制到剪贴板', 'success', 1500);
+                }).catch(() => showToast('复制失败', 'error'));
+            });
+            bubble.appendChild(copyBtn);
+        }
+
+        col.appendChild(bubble);
+
+        // 时间戳放到气泡下方（不再塞进气泡里）
         if (settings.showTimestamp && msg.timestamp) {
             const meta = document.createElement('div');
             meta.className = 'msg-meta';
@@ -387,33 +675,17 @@
             ts.className = 'msg-timestamp';
             ts.textContent = formatTime(new Date(msg.timestamp));
             meta.appendChild(ts);
-            if (msg.role === 'assistant') {
+            if (msg.role === 'assistant' && msg.type !== 'image') {
                 const tokens = document.createElement('span');
                 tokens.className = 'msg-token-count';
-                tokens.textContent = `~${estimateTokens(msg.content)} tokens`;
+                tokens.textContent = `~${estimateTokens(msg.content || '')} tokens`;
                 meta.appendChild(tokens);
             }
-            bubble.appendChild(meta);
+            col.appendChild(meta);
         }
 
-        // 复制按钮
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'bubble-copy';
-        copyBtn.innerHTML = '\u{1f4cb}';
-        copyBtn.title = '复制';
-        copyBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const txt = msg.role === 'user' ? msg.content : contentDiv.textContent;
-            navigator.clipboard.writeText(filterAd(txt)).then(() => {
-                copyBtn.innerHTML = '\u2705';
-                copyBtn.classList.add('copied');
-                setTimeout(() => { copyBtn.innerHTML = '\u{1f4cb}'; copyBtn.classList.remove('copied'); }, 1500);
-                showToast('已复制到剪贴板', 'success', 1500);
-            }).catch(() => showToast('复制失败', 'error'));
-        });
-        bubble.appendChild(copyBtn);
+        row.appendChild(col);
 
-        // AI消息操作按钮（重新生成）
         if (msg.role === 'assistant') {
             const actions = document.createElement('div');
             actions.className = 'bubble-actions';
@@ -426,13 +698,9 @@
                 regenerateMessage(msg);
             });
             actions.appendChild(regenBtn);
-            row.appendChild(bubble);
             row.appendChild(actions);
-        } else {
-            row.appendChild(bubble);
         }
 
-        // 右键菜单事件
         row.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             showContextMenu(e.clientX, e.clientY, msg, row);
@@ -552,40 +820,22 @@
         const timeoutId = setTimeout(() => { if (abortController) abortController.abort(); }, REQUEST_TIMEOUT);
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt }),
-                signal: abortController.signal,
-            });
-
-            clearTimeout(timeoutId);
-            if (!response.ok) {
-                let errMsg = `API 状态码 ${response.status}`;
-                try {
-                    const errBody = await response.text();
-                    if (errBody) errMsg += `: ${errBody.slice(0, 100)}`;
-                } catch (e) {}
-                throw new Error(errMsg);
-            }
-
-            const reader = response.body.getReader();
             let fullText = '';
+            await callChat({
+                promptText: prompt,
+                messages: buildMessages(userMsg),
+                signal: abortController.signal,
+                onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+            });
+            clearTimeout(timeoutId);
 
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                const chunk = new TextDecoder().decode(value);
-                fullText += chunk;
-                throttledRender(aiContent, fullText);
-            }
-
-            const final = filterAd(fullText);
-            aiContent.innerHTML = renderMarkdown(final);
+            const { text, prompt: imgPrompt } = extractGenimg(fullText);
+            const final = filterAd(text);
+            aiContent.innerHTML = final ? renderMarkdown(final) : '<span style="opacity:.6">（已生成图片）</span>';
             highlightCode(aiContent);
 
-            const aiMsg = { role: 'assistant', content: final, timestamp: Date.now(), id: uid() };
-            getMessages().push(aiMsg);
+            getMessages().push({ role: 'assistant', content: final, timestamp: Date.now(), id: uid() });
+            if (imgPrompt) handleGenImage(imgPrompt);
 
         } catch (err) {
             clearTimeout(timeoutId);
@@ -598,7 +848,7 @@
                     aiContent.innerHTML = '\u23f1 请求超时或已停止';
                 }
             } else {
-                aiContent.innerHTML = `<div style="color:var(--danger);">\u26a0\ufe0f ${err.message || '网络或服务异常'}</div><div class="msg-error-actions"><button class="msg-retry-btn" onclick="window.__retryRegenerate()">\ud83d\udd04 重试</button></div>`;
+                aiContent.innerHTML = `<div style="color:var(--danger);">\u26a0\ufe0f ${escapeHTML(err.message || '网络或服务异常')}</div><div class="msg-error-actions"><button class="msg-retry-btn" onclick="window.__retryRegenerate()">\ud83d\udd04 重试</button></div>`;
                 console.error('重新生成失败:', err);
             }
         } finally {
@@ -628,7 +878,6 @@
 
     // ========== 发送消息 ==========
     async function sendMessage(overrideText) {
-        if (isGenerating) return;
         const userMsg = (overrideText || chatInput.value).trim();
         if (!userMsg) return;
 
@@ -636,7 +885,6 @@
         sendBtn.classList.add('sending');
         setTimeout(() => sendBtn.classList.remove('sending'), 400);
 
-        // 如果没有活跃对话，创建一个
         if (!activeConvId || !conversations[activeConvId]) {
             createConversation(userMsg.slice(0, 30));
         }
@@ -646,20 +894,37 @@
         updateCharCount();
         updateSendButtonState();
 
-        // 添加用户消息
         const userMsgObj = { role: 'user', content: userMsg, timestamp: Date.now(), id: uid() };
         getMessages().push(userMsgObj);
         renderMessage(userMsgObj, true);
 
-        // 更新标题
         const conv = currentConv();
         if (conv && getMessages().filter(m => m.role === 'user').length === 1) {
             conv.title = userMsg.slice(0, 30) + (userMsg.length > 30 ? '...' : '');
             renderChatList();
             updateChatTitle();
         }
+        if (conv) conv.updatedAt = Date.now();
+        saveAll();
+        updateStats();
 
-        // 上下文检查：超提醒阈值只提示；超上限且开启自动压缩则先压缩旧消息再发
+        // Waifu 模式：消息先进缓冲，等用户停手再统一回复
+        if (settings.waifuMode) {
+            if (isGenerating && abortController) {
+                waifu.interrupted = true;
+                abortController.abort();
+            }
+            scheduleWaifuReply();
+            return;
+        }
+
+        await runNormalTurn(userMsg);
+    }
+
+    // ---------- 普通模式：一问一答，流式 ----------
+    async function runNormalTurn(userMsg) {
+        if (isGenerating) return;
+
         let prompt = buildPrompt(userMsg);
         const warnAt = settings.warnThreshold || Math.round(settings.maxPromptLength * 0.7);
         if (settings.autoCompact && prompt.length > settings.maxPromptLength) {
@@ -669,7 +934,6 @@
         } else if (prompt.length > warnAt) {
             renderSystemMessage(`\u2139\ufe0f 上下文较长（${prompt.length} 字符），可点顶栏压缩按钮整理记忆`);
         }
-
         prompt = fitPrompt(prompt);
 
         // 创建AI气泡
@@ -694,40 +958,22 @@
         const timeoutId = setTimeout(() => { if (abortController) abortController.abort(); }, REQUEST_TIMEOUT);
 
         try {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt }),
-                signal: abortController.signal,
-            });
-
-            clearTimeout(timeoutId);
-            if (!response.ok) {
-                let errMsg = `API 状态码 ${response.status}`;
-                try {
-                    const errBody = await response.text();
-                    if (errBody) errMsg += `: ${errBody.slice(0, 100)}`;
-                } catch (e) {}
-                throw new Error(errMsg);
-            }
-
-            const reader = response.body.getReader();
             let fullText = '';
+            await callChat({
+                promptText: prompt,
+                messages: buildMessages(userMsg),
+                signal: abortController.signal,
+                onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+            });
+            clearTimeout(timeoutId);
 
-            while (true) {
-                const { value, done } = await reader.read();
-                if (done) break;
-                const chunk = new TextDecoder().decode(value);
-                fullText += chunk;
-                throttledRender(aiContent, fullText);
-            }
-
-            const final = filterAd(fullText);
-            aiContent.innerHTML = renderMarkdown(final);
+            const { text, prompt: imgPrompt } = extractGenimg(fullText);
+            const final = filterAd(text);
+            aiContent.innerHTML = final ? renderMarkdown(final) : '<span style="opacity:.6">（已生成图片）</span>';
             highlightCode(aiContent);
 
-            const aiMsg = { role: 'assistant', content: final, timestamp: Date.now(), id: uid() };
-            getMessages().push(aiMsg);
+            getMessages().push({ role: 'assistant', content: final, timestamp: Date.now(), id: uid() });
+            if (imgPrompt) handleGenImage(imgPrompt);
 
         } catch (err) {
             clearTimeout(timeoutId);
@@ -740,16 +986,12 @@
                     aiContent.innerHTML = '\u23f1 请求超时或已停止';
                 }
             } else {
-                aiContent.innerHTML = `<div style="color:var(--danger);">\u26a0\ufe0f ${err.message || '网络或服务异常'}</div><div class="msg-error-actions"><button class="msg-retry-btn">\ud83d\udd04 重试</button></div>`;
-                // 重试按钮绑定
+                aiContent.innerHTML = `<div style="color:var(--danger);">\u26a0\ufe0f ${escapeHTML(err.message || '网络或服务异常')}</div><div class="msg-error-actions"><button class="msg-retry-btn">\ud83d\udd04 重试</button></div>`;
                 const retryBtn = aiContent.querySelector('.msg-retry-btn');
                 if (retryBtn) {
                     retryBtn.addEventListener('click', () => {
-                        // 移除错误气泡和对应的user消息记录
                         const msgs = getMessages();
-                        if (msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
-                            msgs.pop();
-                        }
+                        if (msgs.length > 0 && msgs[msgs.length - 1].role === 'user') msgs.pop();
                         rebuildMessagesUI();
                         sendMessage(userMsg);
                     });
@@ -764,16 +1006,220 @@
             saveAll();
             updateContextUsage();
             updateStats();
-            // 内存清理
             cleanupOldDOMNodes();
         }
     }
 
-    function stopGeneration() { if (abortController) abortController.abort(); }
+    // ---------- 生图标签解析 ----------
+    function extractGenimg(text) {
+        const src = String(text || '');
+        let m = src.match(/<\s*genimg\b[^>]*?prompt\s*=\s*"([^"]*)"[^>]*?\/?\s*>/i);
+        if (!m) m = src.match(/<\s*genimg\b[^>]*?prompt\s*=\s*'([^']*)'[^>]*?\/?\s*>/i);
+        if (!m) m = src.match(/<\s*genimg\b[^>]*?prompt\s*=\s*([^"'>]+?)\s*\/?\s*>/i);
+        if (!m) return { text: src, prompt: '' };
+        return { text: (src.slice(0, m.index) + src.slice(m.index + m[0].length)).trim(), prompt: m[1].trim() };
+    }
+
+    // ---------- 生图渲染 ----------
+    async function handleGenImage(promptText) {
+        const holder = document.createElement('div');
+        holder.className = 'msg-row assistant';
+        holder.innerHTML = getAvatarHTML(aiProfile, 'assistant');
+        const col = document.createElement('div');
+        col.className = 'bubble-col';
+        const bubble = document.createElement('div');
+        bubble.className = `bubble ${settings.bubbleStyle} assistant`;
+        const content = document.createElement('div');
+        content.className = 'bubble-content';
+        content.innerHTML = '<div class="image-loading"><span class="dot-pulse"></span>正在生成图片…</div>';
+        bubble.appendChild(content);
+        col.appendChild(bubble);
+        holder.appendChild(col);
+        messagesContainer.appendChild(holder);
+        scrollToBottom(true);
+
+        try {
+            const src = await requestImage(promptText);
+            const imageId = uid();
+            let stored = true;
+            try {
+                await imgPut({ id: imageId, data: src, prompt: promptText, createdAt: Date.now() });
+            } catch (e) {
+                stored = false;
+                console.warn('图片入库失败，改为内联保存', e);
+            }
+            content.innerHTML = '';
+            const img = document.createElement('img');
+            img.className = 'msg-image';
+            img.src = src;
+            img.alt = '生成的图片';
+            img.dataset.imgId = imageId;
+            img.addEventListener('click', () => openImageViewer(src));
+            content.appendChild(img);
+            getMessages().push({
+                role: 'assistant', type: 'image', imageId, prompt: promptText,
+                imageInline: stored ? '' : src,
+                timestamp: Date.now(), id: uid(),
+            });
+            saveAll();
+            updateStats();
+            scrollToBottom();
+        } catch (e) {
+            content.innerHTML = `<div style="color:var(--danger);font-size:14px;">\u26a0\ufe0f ${escapeHTML(e.message || '生图失败')}</div>`;
+            console.error('生图失败', e);
+        }
+    }
+
+    function openImageViewer(src) {
+        let v = document.getElementById('image-viewer');
+        if (!v) {
+            v = document.createElement('div');
+            v.id = 'image-viewer';
+            const img = document.createElement('img');
+            v.appendChild(img);
+            v.addEventListener('click', () => v.classList.remove('active'));
+            document.body.appendChild(v);
+        }
+        v.querySelector('img').src = src;
+        v.classList.add('active');
+    }
+
+    // ---------- Waifu 模式 ----------
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    function scheduleWaifuReply() {
+        clearTimeout(waifu.timer);
+        waifu.timer = setTimeout(() => { waifu.timer = null; runWaifuTurn(); }, settings.waifuMergeDelay || 1600);
+    }
+
+    function createBubbleRow() {
+        const row = document.createElement('div');
+        row.className = 'msg-row assistant';
+        row.innerHTML = getAvatarHTML(aiProfile, 'assistant');
+        const col = document.createElement('div');
+        col.className = 'bubble-col';
+        const bubble = document.createElement('div');
+        bubble.className = `bubble ${settings.bubbleStyle} assistant`;
+        const content = document.createElement('div');
+        content.className = 'bubble-content';
+        bubble.appendChild(content);
+        col.appendChild(bubble);
+        row.appendChild(col);
+        messagesContainer.appendChild(row);
+        return { row, content };
+    }
+
+    function splitWaifuMessages(text) {
+        const t = String(text || '').replace(/<br\s*\/?>/gi, '\n').trim();
+        let parts = t.split(/\s*\|{2,}\s*/).map(x => x.trim()).filter(Boolean);
+        if (parts.length <= 1) {
+            const seg = t.split(/\n{2,}/).map(x => x.trim()).filter(Boolean);
+            if (seg.length > 1 && seg.length <= 5) parts = seg;
+        }
+        if (parts.length > 6) parts = [...parts.slice(0, 5), parts.slice(5).join(' ')];
+        return parts.length ? parts : [t];
+    }
+
+    async function playWaifuBubbles(fullText) {
+        const parts = splitWaifuMessages(filterAd(fullText));
+        waifu.playing = true;
+        let emitted = 0;
+
+        for (let i = 0; i < parts.length; i++) {
+            if (waifu.interrupted) { waifu.remainder = parts.slice(i).join(' '); break; }
+
+            const raw = parts[i];
+            const { text, prompt } = extractGenimg(raw);
+
+            const { row, content } = createBubbleRow();
+            content.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
+            scrollToBottom();
+
+            // 模拟打字：字数越多"正在输入"越久
+            await sleep(480 + Math.min(1500, raw.length * 26) + Math.random() * 320);
+            if (waifu.interrupted) {
+                row.remove();
+                waifu.remainder = parts.slice(i).join(' ');
+                break;
+            }
+
+            const finalText = filterAd(text);
+            content.innerHTML = finalText ? renderMarkdown(finalText) : '';
+            highlightCode(content);
+            getMessages().push({ role: 'assistant', content: finalText || '（图片）', timestamp: Date.now(), id: uid() });
+            if (prompt) handleGenImage(prompt);
+            emitted++;
+            scrollToBottom();
+
+            if (i < parts.length - 1) await sleep(240 + Math.random() * 380);
+        }
+
+        waifu.playing = false;
+        if (emitted > 0) waifu.remainder = '';
+    }
+
+    async function runWaifuTurn() {
+        if (!settings.waifuMode || isGenerating) return;
+        const conv = currentConv();
+        if (!conv) return;
+        const msgs = getMessages();
+        const last = msgs[msgs.length - 1];
+        if (!last || last.role !== 'user') return;
+
+        isGenerating = true;
+        waifu.interrupted = false;
+        updateInputState();
+        abortController = new AbortController();
+
+        const typing = createBubbleRow();
+        typing.content.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
+        scrollToBottom();
+
+        let fullText = '';
+        try {
+            await callChat({
+                promptText: fitPrompt(buildPrompt(last.content)),
+                messages: buildMessages(last.content),
+                signal: abortController.signal,
+                onDelta: (d) => { fullText += d; },
+            });
+            typing.row.remove();
+            if (!fullText.trim()) {
+                renderSystemMessage('\u26a0\ufe0f 这次没有生成内容，可以再发一句试试');
+            } else {
+                await playWaifuBubbles(fullText);
+            }
+        } catch (e) {
+            typing.row.remove();
+            if (e.name === 'AbortError') {
+                // 被打断：把没发出的部分留给下一轮 prompt
+                waifu.remainder = filterAd(fullText);
+            } else {
+                console.error('waifu 生成失败', e);
+                renderSystemMessage('\u26a0\ufe0f ' + (e.message || '请求失败'));
+            }
+        } finally {
+            isGenerating = false;
+            abortController = null;
+            updateInputState();
+            saveAll();
+            updateContextUsage();
+            updateStats();
+        }
+    }
+
+    function stopGeneration() {
+        clearTimeout(waifu.timer);
+        waifu.timer = null;
+        waifu.remainder = '';
+        if (abortController) abortController.abort();
+    }
 
     // ========== 输入状态管理 ==========
     function updateInputState() {
-        if (isGenerating) {
+        const wf = !!settings.waifuMode;
+        // Waifu 模式下生成中也能继续发消息（用于打断并重新并入）
+        if (isGenerating && !wf) {
             sendBtn.style.display = 'none';
             stopBtn.style.display = 'flex';
         } else {
@@ -781,12 +1227,12 @@
             stopBtn.style.display = 'none';
         }
         updateSendButtonState();
-        chatInput.disabled = isGenerating;
+        chatInput.disabled = isGenerating && !wf;
     }
 
     function updateSendButtonState() {
         const hasContent = chatInput.value.trim().length > 0;
-        sendBtn.disabled = !hasContent || isGenerating;
+        sendBtn.disabled = !hasContent || (isGenerating && !settings.waifuMode);
     }
 
     // ========== 消息编辑 ==========
@@ -913,11 +1359,14 @@
     function showContextMenu(x, y, msg, rowEl) {
         contextMenuTarget = msg;
 
-        // 根据消息角色显隐菜单项
+        // 根据消息角色显隐菜单项（图片消息只能删除）
+        const isImage = msg.type === 'image';
         const userOnly = contextMenu.querySelectorAll('.ctx-item-user-only');
         const aiOnly = contextMenu.querySelectorAll('.ctx-item-ai-only');
-        userOnly.forEach(el => el.style.display = msg.role === 'user' ? 'flex' : 'none');
-        aiOnly.forEach(el => el.style.display = msg.role === 'assistant' ? 'flex' : 'none');
+        const copyItem = contextMenu.querySelector('[data-action="copy"]');
+        userOnly.forEach(el => el.style.display = (!isImage && msg.role === 'user') ? 'flex' : 'none');
+        aiOnly.forEach(el => el.style.display = (!isImage && msg.role === 'assistant') ? 'flex' : 'none');
+        if (copyItem) copyItem.style.display = isImage ? 'none' : 'flex';
 
         // 定位
         contextMenu.style.left = x + 'px';
@@ -1012,19 +1461,28 @@
     }
 
     // ========== 对话压缩（滚动摘要） ==========
-    const SUMMARY_INSTRUCTION = `你是一个对话记忆压缩器。请把给定的对话记录压缩成一份"记忆快照"，供后续对话直接当作上下文使用。
+    const SUMMARY_INSTRUCTION = `你是一个对话记忆压缩器。请把对话记录整理成一份【记忆档案】，供后续对话直接当作上下文使用。
+
+输出结构（用小标题分节，没有内容的小节可以省略）：
+- 时间坐标：这段对话发生在什么时候、跨了多久、当前处在哪个阶段（例如"从 11 月 20 日聊到 26 日，已经进入第三周"）
+- 人物与设定：对方是谁、怎么称呼、身份/关系、你（AI）在这个对话里的角色
+- 正在做的事：目标、已确认的决定、约定好的规则/格式/称呼、还没解决的问题
+- 关键事实：具体的人名、数字、日期、路径、参数、结论；能保留原话里的关键短语就保留
+- 偏好与禁忌：对方明确说过喜欢/讨厌/不要什么
+- 情绪与关系：当前的氛围、最近一次明显的情绪转折（一两句即可）
 
 写作要求：
-1. 只保留对后续对话有用的信息：用户的目标与诉求、已确认的事实与数据、做出的决定、约定的规则/格式/称呼、代码或文件的要点、尚未解决的问题、用户明确表达的偏好与禁忌。
-2. 用简体中文分条列写，每条一句话；能带上具体名字、数字、路径、参数就带上，不要写成空泛的套话。
-3. 如果提供了【已有摘要】，请把它和新对话合并成一份更新的摘要：旧信息仍然有效就保留，被推翻就替换，重复的合并，不要出现"之前提到过"这类指代。
-4. 不要编造对话里没有的内容，不要添加评论、评价或建议。
-5. 总长度控制在 1200 字以内。
-
-只输出摘要正文，不要任何前言或结尾。`;
+1. 长度由信息量决定，不设固定字数：闲聊就写短（几百字），信息密集可以写到 2000 字左右，但绝不能变成逐句复述对话。
+2. 按主题归并，不要按时间顺序写流水账；只有在时间跨度较大时，才用一个简短的时间线把几个关键节点串起来（例如"11-20 定了方案 → 11-23 推翻重做 → 11-26 定稿"）。
+3. 如果给了【已有摘要】，把它和新内容合并成一份：仍然有效的保留，被推翻的用新结论替换，重复的合并；不要出现"之前提到过""如前所述"这类指代。
+4. 不要编造对话里没有的信息，不要加评论、评价和建议。
+5. 直接输出档案正文，不要前言、不要总结自己的总结。`;
 
     async function requestSummary(existing, chunkText) {
+        const now = new Date();
         const prompt = `${SUMMARY_INSTRUCTION}
+
+【当前时间】${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}
 
 【已有摘要】
 ${existing || '（无）'}
@@ -1080,7 +1538,9 @@ ${chunkText}
         const chunks = [];
         let cur = '', curLen = 0;
         for (const m of toCompress) {
-            const line = (m.role === 'user' ? '用户：' : 'AI：') + m.content + '\n';
+            const t = m.timestamp ? new Date(m.timestamp) : null;
+            const stamp = t ? `[${t.getMonth() + 1}-${t.getDate()} ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}] ` : '';
+            const line = stamp + (m.role === 'user' ? '用户：' : 'AI：') + msgText(m) + '\n';
             if (curLen + line.length > SUMMARY_CHUNK_CHARS && cur) { chunks.push(cur); cur = ''; curLen = 0; }
             cur += line; curLen += line.length;
         }
@@ -1164,50 +1624,6 @@ ${chunkText}
         updateChatTitle();
         updateStats();
         showToast('对话已删除', 'info', 1500);
-    }
-
-    function renameConversation(id) {
-        const conv = conversations[id];
-        if (!conv) return;
-        renameInput.value = conv.title;
-        renameOverlay.classList.add('active');
-        renamePanel.classList.add('active');
-        setTimeout(() => renameInput.focus(), 100);
-
-        const confirmHandler = () => {
-            const newTitle = renameInput.value.trim();
-            if (newTitle) {
-                conv.title = newTitle;
-                saveAll();
-                renderChatList();
-                updateChatTitle();
-                showToast('已重命名', 'success', 1500);
-            }
-            closeRename();
-            cleanup();
-        };
-
-        const cancelHandler = () => { closeRename(); cleanup(); };
-
-        const keyHandler = (e) => {
-            if (e.key === 'Enter') confirmHandler();
-            if (e.key === 'Escape') cancelHandler();
-        };
-
-        const cleanup = () => {
-            $('#rename-confirm').removeEventListener('click', confirmHandler);
-            $('#rename-cancel').removeEventListener('click', cancelHandler);
-            renameInput.removeEventListener('keydown', keyHandler);
-        };
-
-        $('#rename-confirm').addEventListener('click', confirmHandler);
-        $('#rename-cancel').addEventListener('click', cancelHandler);
-        renameInput.addEventListener('keydown', keyHandler);
-    }
-
-    function closeRename() {
-        renameOverlay.classList.remove('active');
-        renamePanel.classList.remove('active');
     }
 
     function clearCurrentConversation() {
@@ -1352,7 +1768,7 @@ ${chunkText}
                     ${preview ? `<span class="item-preview">${escapeHTML(preview)}</span>` : ''}
                 </div>
                 <div class="item-actions">
-                    <button class="item-action-btn" title="重命名" data-action="rename">\u270f\ufe0f</button>
+                    <button class="item-action-btn" title="对话设置" data-action="rename">\u2699\ufe0f</button>
                     <button class="item-action-btn danger" title="删除" data-action="delete">\u2715</button>
                 </div>
             `;
@@ -1404,10 +1820,219 @@ ${chunkText}
     }
 
     // ========== 设置面板 ==========
+    // ========== 设置面板 ==========
+    let editingProviderId = null;
+    let editingImageProviderId = null;
+
+    function renderProviderSelects() {
+        const sel = $('#set-provider');
+        if (sel) {
+            sel.innerHTML = settings.providers.map(p =>
+                `<option value="${p.id}">${escapeHTML(p.name)}${p.type === 'free' ? '（免费）' : ''}</option>`).join('');
+            sel.value = settings.chatProviderId;
+        }
+        const sel2 = $('#set-imageprovider');
+        if (sel2) {
+            sel2.innerHTML = settings.imageProviders.map(p => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
+            sel2.value = settings.imageProviderId;
+        }
+    }
+
+    function renderProviderList() {
+        const box = $('#provider-list');
+        if (!box) return;
+        box.innerHTML = '';
+        settings.providers.forEach(p => {
+            const el = document.createElement('div');
+            el.className = 'provider-item';
+            const sub = p.type === 'free' ? '公益接口 · prompt 协议' : `${escapeHTML(p.baseUrl)} · ${escapeHTML(p.model || '')}`;
+            el.innerHTML = `<div style="min-width:0;flex:1;"><span class="p-name">${escapeHTML(p.name)}</span><span class="p-sub">${sub}</span></div>`;
+            if (p.id === settings.chatProviderId) {
+                const tag = document.createElement('span');
+                tag.className = 'p-tag';
+                tag.textContent = '使用中';
+                el.appendChild(tag);
+            }
+            const edit = document.createElement('button');
+            edit.className = 'btn-small';
+            edit.textContent = '编辑';
+            edit.addEventListener('click', (e) => { e.stopPropagation(); openProviderEditor(p.id); });
+            el.appendChild(edit);
+            if (p.type !== 'free') {
+                const del = document.createElement('button');
+                del.className = 'btn-small danger';
+                del.textContent = '删除';
+                del.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`删除供应商「${p.name}」？`)) return;
+                    settings.providers = settings.providers.filter(x => x.id !== p.id);
+                    if (settings.chatProviderId === p.id) settings.chatProviderId = settings.providers[0].id;
+                    saveAll(); renderProviderList(); renderProviderSelects();
+                    showToast('已删除', 'info');
+                });
+                el.appendChild(del);
+            }
+            el.addEventListener('click', () => {
+                settings.chatProviderId = p.id;
+                saveAll();
+                renderProviderList();
+                renderProviderSelects();
+                showToast(`已切换到「${p.name}」`, 'success', 1500);
+            });
+            box.appendChild(el);
+        });
+    }
+
+    function openProviderEditor(id) {
+        const box = $('#provider-editor');
+        editingProviderId = id || null;
+        const p = id ? settings.providers.find(x => x.id === id) : null;
+        $('#pe-name').value = p ? p.name : '';
+        $('#pe-url').value = p ? p.baseUrl : '';
+        $('#pe-key').value = p ? (p.apiKey || '') : '';
+        $('#pe-model').value = p ? (p.model || '') : '';
+        box.hidden = false;
+    }
+
+    function saveProviderEditor() {
+        const name = $('#pe-name').value.trim() || '未命名接口';
+        const baseUrl = $('#pe-url').value.trim();
+        const apiKey = $('#pe-key').value.trim();
+        const model = $('#pe-model').value.trim();
+        if (!baseUrl) { showToast('请填写 Base URL', 'warning'); return; }
+        if (editingProviderId) {
+            const p = settings.providers.find(x => x.id === editingProviderId);
+            if (p) { p.name = name; p.baseUrl = baseUrl; p.apiKey = apiKey; p.model = model; }
+        } else {
+            const np = { id: uid(), name, type: 'openai', baseUrl, apiKey, model };
+            settings.providers.push(np);
+            settings.chatProviderId = np.id;
+        }
+        $('#provider-editor').hidden = true;
+        editingProviderId = null;
+        saveAll(); renderProviderList(); renderProviderSelects();
+        showToast('已保存', 'success');
+    }
+
+    function renderImageProviderList() {
+        const box = $('#imageprovider-list');
+        if (!box) return;
+        box.innerHTML = '';
+        settings.imageProviders.forEach(p => {
+            const el = document.createElement('div');
+            el.className = 'provider-item';
+            el.innerHTML = `<div style="min-width:0;flex:1;"><span class="p-name">${escapeHTML(p.name)}</span><span class="p-sub">${escapeHTML(p.baseUrl)} · ${escapeHTML(p.model || '')} · ${escapeHTML(p.size || '')}</span></div>`;
+            if (p.id === settings.imageProviderId) {
+                const tag = document.createElement('span');
+                tag.className = 'p-tag';
+                tag.textContent = '使用中';
+                el.appendChild(tag);
+            }
+            const edit = document.createElement('button');
+            edit.className = 'btn-small';
+            edit.textContent = '编辑';
+            edit.addEventListener('click', (e) => { e.stopPropagation(); openImageProviderEditor(p.id); });
+            el.appendChild(edit);
+            if (settings.imageProviders.length > 1) {
+                const del = document.createElement('button');
+                del.className = 'btn-small danger';
+                del.textContent = '删除';
+                del.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (!confirm(`删除生图接口「${p.name}」？`)) return;
+                    settings.imageProviders = settings.imageProviders.filter(x => x.id !== p.id);
+                    if (settings.imageProviderId === p.id) settings.imageProviderId = settings.imageProviders[0].id;
+                    saveAll(); renderImageProviderList(); renderProviderSelects();
+                    showToast('已删除', 'info');
+                });
+                el.appendChild(del);
+            }
+            el.addEventListener('click', () => {
+                settings.imageProviderId = p.id;
+                saveAll(); renderImageProviderList(); renderProviderSelects();
+                showToast(`已切换到「${p.name}」`, 'success', 1500);
+            });
+            box.appendChild(el);
+        });
+    }
+
+    function openImageProviderEditor(id) {
+        const box = $('#imageprovider-editor');
+        editingImageProviderId = id || null;
+        const p = id ? settings.imageProviders.find(x => x.id === id) : null;
+        $('#ipe-name').value = p ? p.name : '';
+        $('#ipe-url').value = p ? p.baseUrl : '';
+        $('#ipe-key').value = p ? (p.apiKey || '') : '';
+        $('#ipe-model').value = p ? (p.model || '') : '';
+        $('#ipe-size').value = p ? (p.size || '1024x1024') : '1024x1024';
+        box.hidden = false;
+    }
+
+    function saveImageProviderEditor() {
+        const name = $('#ipe-name').value.trim() || '未命名生图';
+        const baseUrl = $('#ipe-url').value.trim();
+        const apiKey = $('#ipe-key').value.trim();
+        const model = $('#ipe-model').value.trim();
+        const size = $('#ipe-size').value.trim() || '1024x1024';
+        if (!baseUrl) { showToast('请填写 Base URL', 'warning'); return; }
+        if (editingImageProviderId) {
+            const p = settings.imageProviders.find(x => x.id === editingImageProviderId);
+            if (p) { p.name = name; p.baseUrl = baseUrl; p.apiKey = apiKey; p.model = model; p.size = size; }
+        } else {
+            const np = { id: uid(), name, baseUrl, apiKey, model: model || 'z-image-turbo', size };
+            settings.imageProviders.push(np);
+            settings.imageProviderId = np.id;
+        }
+        $('#imageprovider-editor').hidden = true;
+        editingImageProviderId = null;
+        saveAll(); renderImageProviderList(); renderProviderSelects();
+        showToast('已保存', 'success');
+    }
+
+    async function renderImageGallery() {
+        const box = $('#image-gallery');
+        const cnt = $('#image-count');
+        if (!box || !cnt) return;
+        try {
+            const all = await imgAll();
+            all.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+            cnt.textContent = `共 ${all.length} 张`;
+            box.innerHTML = '';
+            if (all.length === 0) {
+                box.innerHTML = '<div class="hint-text" style="padding:8px 0;">还没有生成的图片</div>';
+                return;
+            }
+            all.forEach(rec => {
+                const d = document.createElement('div');
+                d.className = 'image-thumb';
+                const img = document.createElement('img');
+                img.src = rec.data;
+                img.alt = '';
+                img.addEventListener('click', () => openImageViewer(rec.data));
+                const del = document.createElement('button');
+                del.className = 'thumb-del';
+                del.textContent = '×';
+                del.title = '删除';
+                del.addEventListener('click', async () => {
+                    if (!confirm('删除这张图片？')) return;
+                    await imgDel(rec.id);
+                    renderImageGallery();
+                    rebuildMessagesUI();
+                });
+                d.appendChild(img);
+                d.appendChild(del);
+                box.appendChild(d);
+            });
+        } catch (e) {
+            cnt.textContent = '图片读取失败';
+        }
+    }
+
     function openSettings() {
+        ensureProviders();
         settingsOverlay.classList.add('active');
         settingsPanel.classList.add('active');
-        // 填充值
+
         $('#set-theme').value = settings.colorScheme;
         $('#set-bubble').value = settings.bubbleStyle;
         $('#set-timestamp').checked = settings.showTimestamp;
@@ -1420,11 +2045,20 @@ ${chunkText}
         $('#set-warn').value = settings.warnThreshold;
         $('#set-rounds').value = settings.recentRounds;
         $('#set-autocompact').checked = !!settings.autoCompact;
+        $('#set-waifu').checked = !!settings.waifuMode;
+        $('#set-selfportrait').value = settings.selfPortrait || '';
         $('#set-systemprompt').value = settings.systemPrompt || '';
         const spStatus = $('#systemprompt-status');
         if (spStatus) spStatus.textContent = '';
         $('#blur-val').textContent = settings.backgroundBlur;
         $('#opacity-val').textContent = Math.round(settings.backgroundOpacity * 100);
+        $('#provider-editor').hidden = true;
+        $('#imageprovider-editor').hidden = true;
+
+        renderProviderSelects();
+        renderProviderList();
+        renderImageProviderList();
+        renderImageGallery();
         updateContextUsage();
     }
 
@@ -1434,11 +2068,13 @@ ${chunkText}
         settings.showTimestamp = $('#set-timestamp').checked;
         settings.backgroundImage = $('#set-bgurl').value.trim();
         settings.backgroundBlur = parseFloat($('#set-blur').value) || 0;
-        settings.backgroundOpacity = parseFloat($('#set-opacity').value) || 0.85;
+        settings.backgroundOpacity = parseFloat($('#set-opacity').value) || 0.75;
         settings.maxPromptLength = Math.min(MAX_PROMPT_CHARS, Math.max(5000, parseInt($('#set-maxlen').value, 10) || 80000));
         settings.warnThreshold = Math.min(settings.maxPromptLength, Math.max(1000, parseInt($('#set-warn').value, 10) || 56000));
         settings.recentRounds = Math.min(50, Math.max(1, parseInt($('#set-rounds').value, 10) || 10));
         settings.autoCompact = $('#set-autocompact').checked;
+        settings.waifuMode = $('#set-waifu').checked;
+        settings.selfPortrait = ($('#set-selfportrait').value || '').trim();
         settings.systemPrompt = ($('#set-systemprompt').value || '').trim();
         userProfile.avatar = $('#set-useravatar').value.trim();
         aiProfile.avatar = $('#set-aiavatar').value.trim();
@@ -1446,11 +2082,145 @@ ${chunkText}
         applyTheme();
         applyBackground();
         applyHighlightTheme();
+        applyMode();
         saveAll();
         rebuildMessagesUI();
 
         settingsOverlay.classList.remove('active');
         settingsPanel.classList.remove('active');
+    }
+
+    // ========== 对话设置（名称 + 专属提示词） ==========
+    function renameConversation(id) {
+        const conv = conversations[id];
+        if (!conv) return;
+        renameInput.value = conv.title;
+        const sp = $('#rename-systemprompt');
+        if (sp) sp.value = conv.systemPrompt || '';
+        renameOverlay.classList.add('active');
+        renamePanel.classList.add('active');
+        setTimeout(() => renameInput.focus(), 100);
+
+        const confirmHandler = () => {
+            const newTitle = renameInput.value.trim();
+            if (newTitle) conv.title = newTitle;
+            conv.systemPrompt = (($('#rename-systemprompt') || {}).value || '').trim();
+            saveAll();
+            renderChatList();
+            updateChatTitle();
+            updateContextUsage();
+            showToast('已保存', 'success', 1500);
+            closeRename();
+            cleanup();
+        };
+
+        const cancelHandler = () => { closeRename(); cleanup(); };
+
+        const keyHandler = (e) => {
+            if (e.key === 'Enter' && e.target === renameInput) confirmHandler();
+            if (e.key === 'Escape') cancelHandler();
+        };
+
+        const cleanup = () => {
+            $('#rename-confirm').removeEventListener('click', confirmHandler);
+            $('#rename-cancel').removeEventListener('click', cancelHandler);
+            renameInput.removeEventListener('keydown', keyHandler);
+        };
+
+        $('#rename-confirm').addEventListener('click', confirmHandler);
+        $('#rename-cancel').addEventListener('click', cancelHandler);
+        renameInput.addEventListener('keydown', keyHandler);
+    }
+
+    function closeRename() {
+        renameOverlay.classList.remove('active');
+        renamePanel.classList.remove('active');
+    }
+
+    // ========== 模式切换 ==========
+    function applyMode() {
+        const wf = !!settings.waifuMode;
+        const label = $('#mode-label');
+        if (label) label.textContent = wf ? 'WA' : 'AI';
+        const btn = $('#mode-btn');
+        if (btn) btn.classList.toggle('active', wf);
+        const hint = $('#input-hint');
+        if (hint) hint.textContent = wf ? 'Waifu 模式：可以连着发几句，AI 会等你说完再回' : 'Enter 发送 / Shift+Enter 换行';
+        updateInputState();
+    }
+
+    function toggleMode() {
+        settings.waifuMode = !settings.waifuMode;
+        if (!settings.waifuMode) {
+            clearTimeout(waifu.timer);
+            waifu.timer = null;
+            waifu.remainder = '';
+        }
+        applyMode();
+        saveAll();
+        showToast(settings.waifuMode ? '已切换到 Waifu 模式' : '已切换到普通模式', 'info', 1600);
+    }
+
+    // ========== 全量导入导出 ==========
+    async function exportAll() {
+        try {
+            showToast('正在打包数据…', 'info', 1500);
+            const all = await imgAll();
+            const images = {};
+            all.forEach(r => { images[r.id] = { id: r.id, data: r.data, prompt: r.prompt || '', createdAt: r.createdAt || 0 }; });
+            const payload = {
+                app: 'aichat', version: 3, exportedAt: new Date().toISOString(),
+                settings, userProfile, aiProfile, conversations, images,
+            };
+            const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `aichat-backup-${new Date().toISOString().slice(0, 10)}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+            showToast('已导出（含 API Key，请妥善保管）', 'success', 3000);
+        } catch (e) {
+            showToast('导出失败：' + (e.message || e), 'error');
+        }
+    }
+
+    async function importAll(file) {
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            if (!data || typeof data !== 'object') throw new Error('文件内容为空');
+            if (!confirm('导入会合并对话并覆盖设置，确定吗？')) return;
+
+            if (data.settings) settings = { ...settings, ...data.settings };
+            if (data.userProfile) userProfile = { ...userProfile, ...data.userProfile };
+            if (data.aiProfile) aiProfile = { ...aiProfile, ...data.aiProfile };
+            if (data.conversations && typeof data.conversations === 'object') {
+                conversations = { ...conversations, ...data.conversations };
+            }
+            if (data.images && typeof data.images === 'object') {
+                for (const key of Object.keys(data.images)) {
+                    const rec = data.images[key];
+                    const value = typeof rec === 'string' ? { id: key, data: rec, createdAt: Date.now() } : rec;
+                    if (value && value.id && value.data) await imgPut(value);
+                }
+            }
+            ensureProviders();
+            saveAll();
+            applyTheme();
+            applyBackground();
+            applyHighlightTheme();
+            applyMode();
+            renderChatList();
+            rebuildMessagesUI();
+            updateStats();
+            renderImageGallery();
+            showToast('导入完成', 'success');
+        } catch (e) {
+            console.error(e);
+            showToast('导入失败：' + (e.message || e), 'error');
+        }
     }
 
     // ========== 主题与背景 ==========
@@ -1507,6 +2277,8 @@ ${chunkText}
         let text = `对话：${conv.title}\n`;
         text += `时间：${new Date(conv.createdAt).toLocaleString()}\n`;
         text += '='.repeat(50) + '\n\n';
+        const spText = (conv.systemPrompt || '').trim();
+        if (spText) text += `[本对话系统提示词]\n${spText}\n\n`;
         if (conv.summary) text += `[摘要]\n${conv.summary}\n\n`;
         conv.messages.forEach(m => {
             const time = new Date(m.timestamp).toLocaleTimeString();
@@ -1629,6 +2401,58 @@ ${chunkText}
         $('#summary-btn').addEventListener('click', manualSummary);
         $('#fullscreen-btn').addEventListener('click', toggleFullscreen);
         $('#settings-top-btn').addEventListener('click', openSettings);
+
+        // 模式切换
+        $('#mode-btn').addEventListener('click', toggleMode);
+        $('#set-waifu').addEventListener('change', () => {
+            settings.waifuMode = $('#set-waifu').checked;
+            applyMode();
+            saveAll();
+        });
+
+        // 聊天服务商
+        $('#set-provider').addEventListener('change', (e) => {
+            settings.chatProviderId = e.target.value;
+            saveAll();
+            renderProviderList();
+            showToast('已切换聊天接口', 'success', 1500);
+        });
+        $('#provider-add').addEventListener('click', () => openProviderEditor(null));
+        $('#pe-save').addEventListener('click', saveProviderEditor);
+        $('#pe-cancel').addEventListener('click', () => { $('#provider-editor').hidden = true; editingProviderId = null; });
+
+        // 生图服务商
+        $('#set-imageprovider').addEventListener('change', (e) => {
+            settings.imageProviderId = e.target.value;
+            saveAll();
+            renderImageProviderList();
+            showToast('已切换生图接口', 'success', 1500);
+        });
+        $('#imageprovider-add').addEventListener('click', () => openImageProviderEditor(null));
+        $('#ipe-save').addEventListener('click', saveImageProviderEditor);
+        $('#ipe-cancel').addEventListener('click', () => { $('#imageprovider-editor').hidden = true; editingImageProviderId = null; });
+        $('#set-selfportrait').addEventListener('change', () => {
+            settings.selfPortrait = ($('#set-selfportrait').value || '').trim();
+            saveAll();
+        });
+
+        // 图片管理
+        $('#clear-images').addEventListener('click', async () => {
+            if (!confirm('清空所有已生成的图片？对话里的图片也会变成"已删除"。')) return;
+            await imgClearAll();
+            renderImageGallery();
+            rebuildMessagesUI();
+            showToast('图片已清空', 'success');
+        });
+
+        // 全量数据
+        $('#export-all').addEventListener('click', exportAll);
+        $('#import-all').addEventListener('click', () => $('#import-file').click());
+        $('#import-file').addEventListener('change', (e) => {
+            const f = e.target.files && e.target.files[0];
+            e.target.value = '';
+            if (f) importAll(f);
+        });
 
         // 系统提示词：保存 / 清空
         const persistSystemPrompt = (notify) => {
@@ -1872,12 +2696,25 @@ ${chunkText}
         });
 
         loadAll();
+
+        // 一次性默认值迁移（v3）：没设过背景的用默认壁纸，遮罩透明度对齐 75%
+        if (!settings._defaultsV3) {
+            if (!settings.backgroundImage) settings.backgroundImage = 'https://t.alcy.cc/ycy';
+            if (!settings.backgroundBlur) settings.backgroundBlur = 0;
+            if (settings.backgroundOpacity === undefined || Math.abs(settings.backgroundOpacity - 0.85) < 0.001) {
+                settings.backgroundOpacity = 0.75;
+            }
+            settings._defaultsV3 = true;
+        }
+        ensureProviders();
+
         applyTheme();
         applyBackground();
         applyHighlightTheme();
         updateNetworkStatus();
         updateSendButtonState();
         bindEvents();
+        applyMode();
 
         welcomeGreeting.textContent = getTimeGreeting();
         welcomeTime.textContent = getTimeString();
