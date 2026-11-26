@@ -13,8 +13,7 @@ const OUT = 'flicker-out';
 fs.mkdirSync(OUT, { recursive: true });
 
 const variants = [
-    { key: 'texture-fixed', css: '' },
-    { key: 'texture-scroll', css: '.bubble{background-attachment:scroll,scroll!important}' },
+    { key: 'texture-tile', css: '' },
     { key: 'solid-glass', css: ':root{--glass-tex:none!important}' },
 ];
 
@@ -69,16 +68,10 @@ for (const v of variants) {
     }
     await page.waitForTimeout(900);
 
-    const cdp = await ctx.newCDPSession(page);
-    const frames = [];
-    cdp.on('Page.screencastFrame', async ({ data, sessionId }) => {
-        frames.push(data);
-        try { await cdp.send('Page.screencastFrameAck', { sessionId }); } catch { }
-    });
+    // 用连续截图采样（比 screencast 稳定），间隔约 60-90ms
+    const dir = path.join(OUT, v.key);
+    fs.mkdirSync(dir, { recursive: true });
 
-    const start = frames.length;
-    await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 80, everyNthFrame: 1, maxWidth: 390, maxHeight: 844 });
-    await page.waitForTimeout(150);
     await page.evaluate(() => { window.__canned = '好呀 ||| 我这就去准备 ||| 你稍等'; });
     await page.evaluate(() => {
         const el = document.querySelector('#chat-input');
@@ -86,14 +79,12 @@ for (const v of variants) {
         el.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await page.click('#send-btn');
-    await page.waitForTimeout(5200);
-    try { await cdp.send('Page.stopScreencast'); } catch { }
 
-    const slice = frames.slice(start);
-    const dir = path.join(OUT, v.key);
-    fs.mkdirSync(dir, { recursive: true });
-    slice.forEach((f, i) => fs.writeFileSync(path.join(dir, String(i).padStart(4, '0') + '.jpg'), Buffer.from(f.data, 'base64')));
-    console.log(`${v.key}: ${slice.length} frames`);
+    for (let i = 0; i < 46; i++) {
+        const buf = await page.screenshot({ type: 'jpeg', quality: 82 });
+        fs.writeFileSync(path.join(dir, String(i).padStart(4, '0') + '.jpg'), buf);
+    }
+    console.log(`${v.key}: captured`);
 
     await ctx.close();
 }
