@@ -21,7 +21,7 @@
     const CONV_STORE = 'conversations';
     const DOM_CLEANUP_THRESHOLD = 200; // 消息数量阈值，超过后清理旧DOM
     const RAF_THROTTLE_MS = 32;
-    const STREAM_THROTTLE_MS = 120; // 流式渲染节流（markdown 全量重解析很贵）
+    const STREAM_THROTTLE_MS = 32; // 流式渲染节流（~30fps）
 
     // ========== 增强广告过滤规则 ==========
     const AD_FILTERS = [
@@ -447,12 +447,16 @@
     const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
     const waifu = { timer: null, remainder: '', interrupted: false, playing: false };
 
-    function nowBlock() {
+    function nowString() {
         const d = new Date();
         const hh = String(d.getHours()).padStart(2, '0');
         const mm = String(d.getMinutes()).padStart(2, '0');
-        return `【现在】${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]} ${hh}:${mm}（UTC+8）
-这是本轮对话的真实时间。凡是涉及"今天、昨天、明天、刚才、上周、多久没聊、现在几点"这类相对时间，一律以它为唯一基准；不要用你训练数据里的日期，也不要反问用户今天几号。`;
+        return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${WEEKDAYS[d.getDay()]} ${hh}:${mm}（UTC+8）`;
+    }
+
+    // 隐性时间：让模型心里有数，但不挂在嘴边
+    function timeBlock() {
+        return getPrompt('time').replace(/\{time\}/g, nowString());
     }
 
     // ---------- 提示词工程（可在设置里改，留空即用默认） ----------
@@ -484,6 +488,10 @@
 
 每次回复最多一张。prompt 用英文，写清人物外貌、服装、表情、动作、环境、光线、镜头与风格（如 photorealistic, selfie, natural light, 35mm）。
 不要在正文里提这个标签，它会自动变成图片。`,
+
+        time: `【你心里有数的时间】现在大约是 {time}。
+你清楚今天是几号、几点、星期几。聊天时如果需要这份感知，自然用上就好——对方说"好困"你知道是深夜，说"好久没见"你知道隔了多久，聊到日期也不会说错。
+不要主动报时间，不要在回复里提它，也不要说"根据系统时间"之类的话。`,
 
         get summary() { return SUMMARY_INSTRUCTION; },
     };
@@ -538,7 +546,7 @@
         const parts = [];
         const sys = activeSystemPrompt();
         if (sys) parts.push(`【系统设定】\n${sys}\n【系统设定结束】`);
-        parts.push(nowBlock());
+        parts.push(timeBlock());
         const summary = getSummary();
         if (summary.trim()) parts.push(`【历史摘要】\n${summary.trim()}\n【摘要结束】`);
         if (getMessages().length > 1) {
@@ -2309,6 +2317,7 @@ ${chunkText}
         $('#set-imagegen').checked = !!settings.imageGenEnabled;
         $('#set-selfportrait').value = settings.selfPortrait || '';
         $('#set-systemprompt').value = settings.systemPrompt || '';
+        $('#prompt-time').value = getPrompt('time');
         $('#prompt-waifu').value = getPrompt('waifu');
         $('#prompt-image').value = getPrompt('image');
         $('#prompt-summary').value = getPrompt('summary');
@@ -2329,7 +2338,7 @@ ${chunkText}
     // 把界面上的提示词写回 settings（和默认值相同就存空，跟随默认演进）
     function savePromptsFromUI() {
         settings.prompts = settings.prompts || {};
-        ['waifu', 'image', 'summary'].forEach(k => {
+        ['waifu', 'image', 'summary', 'time'].forEach(k => {
             const el = $('#prompt-' + k);
             if (!el) return;
             const v = el.value.trim();
