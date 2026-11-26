@@ -1,0 +1,52 @@
+name: UI Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        run: |
+          npm init -y >/dev/null 2>&1 || true
+          npm i playwright@latest --no-audit --no-fund
+          npx playwright install chromium
+
+      - name: Start static server
+        run: |
+          python3 -m http.server 8123 --bind 127.0.0.1 >/tmp/http.log 2>&1 &
+          sleep 2
+          curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8123/
+
+      - name: Run UI tests
+        run: node .github/ui-test.mjs
+
+      - name: Also test deployed site
+        if: always()
+        continue-on-error: true
+        env:
+          BASE_URL: https://hiweny.github.io/ai-chat/
+        run: |
+          mkdir -p ui-out-live
+          cp -r ui-out ui-out-local 2>/dev/null || true
+          node .github/ui-test.mjs || true
+          mv ui-out ui-out-live 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-shots
+          path: |
+            ui-out/**
+            ui-out-live/**
+          retention-days: 7
