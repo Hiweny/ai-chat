@@ -975,10 +975,13 @@
 
             const { text, prompt: imgPrompt } = extractGenimg(fullText);
             const final = filterAd(text);
-            aiContent.innerHTML = final ? renderMarkdown(final) : '<span style="opacity:.6">（已生成图片）</span>';
-            highlightCode(aiContent);
-
-            getMessages().push({ role: 'assistant', content: final, timestamp: Date.now(), id: uid() });
+            if (final) {
+                aiContent.innerHTML = renderMarkdown(final);
+                highlightCode(aiContent);
+                getMessages().push({ role: 'assistant', content: final, timestamp: Date.now(), id: uid() });
+            } else {
+                aiRow.remove();
+            }
             if (imgPrompt) handleGenImage(imgPrompt);
 
         } catch (err) {
@@ -1115,10 +1118,13 @@
 
             const { text, prompt: imgPrompt } = extractGenimg(fullText);
             const final = filterAd(text);
-            aiContent.innerHTML = final ? renderMarkdown(final) : '<span style="opacity:.6">（已生成图片）</span>';
-            highlightCode(aiContent);
-
-            getMessages().push({ role: 'assistant', content: final, timestamp: Date.now(), id: uid() });
+            if (final) {
+                aiContent.innerHTML = renderMarkdown(final);
+                highlightCode(aiContent);
+                getMessages().push({ role: 'assistant', content: final, timestamp: Date.now(), id: uid() });
+            } else {
+                aiRow.remove();
+            }
             if (imgPrompt) handleGenImage(imgPrompt);
 
         } catch (err) {
@@ -1290,12 +1296,15 @@
             }
 
             const finalText = filterAd(text);
-            content.innerHTML = finalText ? renderMarkdown(finalText) : '';
-            highlightCode(content);
             if (finalText) {
+                content.innerHTML = renderMarkdown(finalText);
+                highlightCode(content);
                 getMessages().push({ role: 'assistant', content: finalText, timestamp: Date.now(), id: uid() });
+                emitted++;
+            } else {
+                // 这条只有图没有字：不要留下一个空气泡
+                row.remove();
             }
-            emitted++;
             scrollToBottom();
 
             // 生图要等它真的出来再继续下一条，否则图片会插到后面消息的下面
