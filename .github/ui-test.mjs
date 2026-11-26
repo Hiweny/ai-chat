@@ -70,6 +70,9 @@ ok('左胶囊只包汉堡（宽度 < 60）', geo.L.w < 60, `w=${geo.L.w}`);
 ok('标题占满中间空隙', geo.T.w > 60, `w=${geo.T.w}`);
 await page.screenshot({ path: path.join(OUT, '02-topbar.jpg'), type: 'jpeg', quality: 72, clip: { x: 0, y: 0, width: 390, height: 80 } });
 
+const avatarCount = await page.locator('.msg-row .avatar').count();
+ok('未设置头像时不显示头像', avatarCount === 0, `count=${avatarCount}`);
+
 // ---------- 3. 设置面板 ----------
 await page.click('#settings-top-btn');
 await page.waitForTimeout(400);
@@ -85,13 +88,16 @@ const warnVal = await page.getAttribute('#set-warn', 'max');
 ok('设置面板有聊天服务选择', hasProvider);
 ok('设置面板有上下文上限', hasCtx);
 ok('提醒阈值改为百分数', warnVal === '95', `max=${warnVal}`);
-const order = await page.evaluate(() => {
-    const titles = [...document.querySelectorAll('.settings-section .section-title')].map(e => e.textContent.trim());
-    return titles;
+const ctxInside = await page.evaluate(() => {
+    const sections = [...document.querySelectorAll('.settings-section')];
+    const chat = sections.find(sec => (sec.querySelector('.section-title') || {}).textContent === '聊天服务');
+    if (!chat) return false;
+    return !!chat.querySelector('#set-maxlen') && !!chat.querySelector('#set-warn');
 });
-ok('上下文区块在聊天/生图之后、提示词之前',
-    order.indexOf('上下文与模式') > order.indexOf('聊天服务') && order.indexOf('上下文与模式') < order.indexOf('系统提示词'),
-    JSON.stringify(order));
+ok('上下文设置嵌在聊天服务里', ctxInside);
+
+const order = await page.evaluate(() => [...document.querySelectorAll('.settings-section .section-title')].map(e => e.textContent.trim()));
+ok('设置分区顺序合理', order[0] === '聊天服务' && order.includes('提示词工程'), JSON.stringify(order));
 await page.evaluate(() => { document.querySelector('#settings-panel .settings-body').scrollTop = 99999; });
 await page.waitForTimeout(300);
 await page.screenshot({ path: path.join(OUT, '04-settings-bottom.jpg'), type: 'jpeg', quality: 72 });
@@ -188,6 +194,12 @@ ok('图片插在两条消息之间而不是最下方', imgIdx >= 0 && imgIdx < o
 const emptyBubbles = await page.evaluate(() => [...document.querySelectorAll('.msg-row .bubble-content')]
     .filter(e => !(e.textContent || '').trim() && !e.querySelector('img, canvas')).length);
 ok('没有空气泡残留', emptyBubbles === 0, `empty=${emptyBubbles}`);
+const imgNoBubble = await page.evaluate(() => {
+    const imgs = [...document.querySelectorAll('.image-msg img')];
+    if (!imgs.length) return false;
+    return imgs.every(img => !img.closest('.bubble'));
+});
+ok('图片不包在气泡里', imgNoBubble);
 await page.screenshot({ path: path.join(OUT, '07b-waifu-image.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 6. 多会话与刷新 ----------
@@ -229,6 +241,13 @@ await page.reload({ waitUntil: 'networkidle' });
 await page.waitForTimeout(1200);
 const titleAfterReload = await page.textContent('#chat-title');
 ok('刷新后仍停留在该对话', String(titleAfterReload).includes('我的专属对话'), titleAfterReload);
+const actionVisible = await page.evaluate(() => {
+    const el = document.querySelector('.chat-list-item .item-actions');
+    if (!el) return false;
+    const cs = getComputedStyle(el);
+    return cs.display !== 'none';
+});
+ok('侧栏操作按钮常显', actionVisible);
 const convStillExists = await page.locator('.chat-list-item').count();
 ok('刷新后对话仍在列表', convStillExists >= 1, `count=${convStillExists}`);
 
