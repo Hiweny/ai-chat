@@ -2266,3 +2266,34 @@ select:focus:not(:focus-visible) {
 @media (min-width: 769px) {
     .bar-pill-left { display: none; }
 }
+
+/* ============================================================
+   v4：顶栏标题紧贴左胶囊，占据两个胶囊之间的空隙
+   ============================================================ */
+#top-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chat-title {
+    position: static;
+    transform: none;
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    text-align: left;
+    padding: 0 2px;
+    pointer-events: auto;
+}
+
+.bar-pill-left { flex: 0 0 auto; }
+.bar-pill-right { flex: 0 0 auto; margin-left: 0; }
+
+@media (max-width: 768px) {
+    .chat-title { max-width: none; font-size: 14px; }
+}
+
+/* waifu 生成中：发送与停止并排 */
+.input-actions .btn-send,
+.input-actions .btn-stop { flex-shrink: 0; }
