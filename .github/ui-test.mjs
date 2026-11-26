@@ -74,6 +74,11 @@ await page.screenshot({ path: path.join(OUT, '02-topbar.jpg'), type: 'jpeg', qua
 await page.click('#settings-top-btn');
 await page.waitForTimeout(400);
 await page.screenshot({ path: path.join(OUT, '03-settings-top.jpg'), type: 'jpeg', quality: 72 });
+const editorHidden = await page.evaluate(() => {
+    const el = document.querySelector('#provider-editor');
+    return !el || el.offsetParent === null;
+});
+ok('服务商编辑表单默认隐藏', editorHidden);
 const hasProvider = await page.isVisible('#set-provider');
 const hasCtx = await page.isVisible('#set-maxlen');
 const warnVal = await page.getAttribute('#set-warn', 'max');
@@ -90,6 +95,13 @@ ok('上下文区块在聊天/生图之后、提示词之前',
 await page.evaluate(() => { document.querySelector('#settings-panel .settings-body').scrollTop = 99999; });
 await page.waitForTimeout(300);
 await page.screenshot({ path: path.join(OUT, '04-settings-bottom.jpg'), type: 'jpeg', quality: 72 });
+// 导出备份
+const dl = await Promise.all([
+    page.waitForEvent('download', { timeout: 15000 }).catch(() => null),
+    page.evaluate(() => document.querySelector('#export-all').click()),
+]).then(r => r[0]);
+ok('可以导出备份文件', !!dl, dl ? await dl.suggestedFilename() : 'no download');
+
 await page.click('#close-settings');
 await page.waitForTimeout(300);
 
