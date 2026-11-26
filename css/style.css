@@ -2297,3 +2297,11 @@ select:focus:not(:focus-visible) {
 /* waifu 生成中：发送与停止并排 */
 .input-actions .btn-send,
 .input-actions .btn-stop { flex-shrink: 0; }
+
+/* hidden 属性必须胜出（作者样式的 display 会覆盖 UA 的 [hidden]） */
+[hidden] { display: none !important; }
+
+/* 服务商列表：条目自适应用高度，避免长 URL 被挤压 */
+.provider-item { min-height: 46px; align-items: flex-start; padding: 9px 12px; }
+.provider-item > div { line-height: 1.45; }
+.provider-item .p-name { display: inline-block; margin-bottom: 2px; }
