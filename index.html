@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="auto">
+<html lang="zh-CN" data-theme="auto" data-style="modern">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -251,6 +251,7 @@
                 <div class="setting-item">
                     <label>AI 自画像描述 <span class="hint-text">(自拍时用，可留空)</span></label>
                     <textarea id="set-selfportrait" rows="3" placeholder="例如：a 20-year-old Chinese girl with long black hair, wearing a white hoodie..."></textarea>
+                    <div class="hint-text" id="selfportrait-hint" style="margin-top:4px;"></div>
                 </div>
             </div>
 
@@ -328,6 +329,9 @@
                     <label>气泡样式</label>
                     <select id="set-bubble">
                         <option value="modern">现代简约</option>
+                        <option value="wechat">微信风</option>
+                        <option value="telegram">Telegram</option>
+                        <option value="imessage">iMessage</option>
                         <option value="ios">毛玻璃</option>
                         <option value="water">水玻璃</option>
                         <option value="none">无气泡</option>
