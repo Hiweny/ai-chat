@@ -3187,3 +3187,27 @@ html[data-style="none"][data-theme="dark"] {
     opacity: .45;
 }
 .pw-group-title:first-of-type { margin-top: 4px; }
+
+/* 用户发的图片：缩小挂在气泡下方，不占气泡 */
+.msg-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 5px;
+    justify-content: flex-end;
+    max-width: 100%;
+}
+.msg-images img {
+    height: 76px;
+    width: auto;
+    max-width: 120px;
+    border-radius: 9px;
+    object-fit: cover;
+    display: block;
+    cursor: zoom-in;
+    border: 1px solid rgba(127, 127, 127, .18);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+    transition: transform .15s ease;
+}
+.msg-images img:active { transform: scale(.96); }
+.bubble.bubble-empty { display: none !important; }
