@@ -155,11 +155,12 @@
     // 修复：中文欢迎语
     const getTimeGreeting = () => {
         const h = new Date().getHours();
-        if (h >= 5 && h < 12) return '\u2600\ufe0f 早上好';
-        if (h >= 12 && h < 14) return '\ud83c\udf24\ufe0f 中午好';
-        if (h >= 14 && h < 18) return '\ud83c\udf3b 下午好';
-        if (h >= 18 && h < 22) return '\ud83c\udf19 晚上好';
-        return '\u2728 夜深了';
+        // 不带 emoji：部分设备/无彩色字体环境会把 emoji 渲染成方块
+        if (h >= 5 && h < 12) return '早上好';
+        if (h >= 12 && h < 14) return '中午好';
+        if (h >= 14 && h < 18) return '下午好';
+        if (h >= 18 && h < 22) return '晚上好';
+        return '夜深了';
     };
 
     function getTimeString() {
@@ -3211,10 +3212,9 @@ ${chunkText}
 
         await loadAll();
 
-        // 一次性默认值迁移（v3）：没设过背景的用默认壁纸，遮罩透明度对齐 75%
+        // 一次性默认值迁移（v3）：只对齐模糊/亮度，不再注入任何默认壁纸
         if (!settings._defaultsV3) {
-            if (!settings.backgroundImage) settings.backgroundImage = 'https://t.alcy.cc/ycy';
-            if (!settings.backgroundBlur) settings.backgroundBlur = 0;
+            if (settings.backgroundBlur === undefined) settings.backgroundBlur = 0;
             if (settings.backgroundBrightness === undefined) settings.backgroundBrightness = 100;
             settings._defaultsV3 = true;
         }
@@ -3231,10 +3231,13 @@ ${chunkText}
         if (!settings._defaultsV6) {
             const OLD_AI = 'https://ps.ssl.qhmsg.com/t02fdce69cbf85f1dd9.jpg';
             const OLD_USER = 'https://ps.ssl.qhmsg.com/t021d922984a57bfbc6.jpg';
-            const OLD_BG = 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg';
+            const OLD_BGS = [
+                'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg', // v4 写进去的
+                'https://t.alcy.cc/ycy',                             // v3 写进去的随机图
+            ];
             if (userProfile.avatar === OLD_USER) userProfile.avatar = '';
             if (aiProfile.avatar === OLD_AI) aiProfile.avatar = '';
-            if (settings.backgroundImage === OLD_BG) settings.backgroundImage = '';
+            if (OLD_BGS.includes(settings.backgroundImage)) settings.backgroundImage = '';
             if (!hasImageKey()) settings.imageGenEnabled = false;
             settings._defaultsV6 = true;
             saveAll();
