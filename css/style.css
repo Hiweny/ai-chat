@@ -3176,3 +3176,14 @@ html[data-style="none"][data-theme="dark"] {
 .ctx-meter.warn .ctx-meter-track > i { background: linear-gradient(90deg, #f0b429, #e59a1c); }
 .ctx-meter.danger .ctx-meter-track > i { background: linear-gradient(90deg, #ee6a5f, #d94a3d); }
 .ctx-meter-foot { font-size: 11.5px; opacity: .62; margin-top: 7px; line-height: 1.5; }
+
+/* 提示词工程的分组小标题 */
+.pw-group-title {
+    margin: 16px 0 8px;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    opacity: .45;
+}
+.pw-group-title:first-of-type { margin-top: 4px; }
