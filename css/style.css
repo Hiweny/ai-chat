@@ -2497,3 +2497,515 @@ select:focus:not(:focus-visible) {
     align-items: center;
     justify-content: center;
 }
+
+/* ============================================================
+   Theme System v2
+   一套变量控制整站外观：气泡 / 胶囊 / 输入框 / 侧栏 / 设置面板
+   data-style = modern | wechat | telegram | imessage | ios | water | none
+   ============================================================ */
+
+html[data-style="modern"] {
+    --t-bub-u-bg: #2d78dc;
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 2px 10px rgba(45,120,220,0.24);
+    --t-bub-a-bg: #ffffff;
+    --t-bub-a-fg: #2c2c2e;
+    --t-bub-a-bd: 1px solid rgba(0,0,0,0.05);
+    --t-bub-a-sh: 0 1px 4px rgba(0,0,0,0.06);
+    --t-bub-r: 20px;
+    --t-bub-tail: 6px;
+    --t-bub-font: 15px;
+    --t-surf-bg: rgba(255,255,255,0.92);
+    --t-surf-bd: rgba(0,0,0,0.06);
+    --t-surf-sh: 0 2px 10px rgba(0,0,0,0.06);
+    --t-surf-bl: blur(20px) saturate(1.6);
+    --t-nav-bg: rgba(250,249,247,0.94);
+    --t-nav-bl: blur(20px);
+    --t-panel-bg: #ffffff;
+}
+html[data-style="wechat"] {
+    --t-bub-u-bg: #95ec69;
+    --t-bub-u-fg: #191919;
+    --t-bub-u-sh: none;
+    --t-bub-a-bg: #ffffff;
+    --t-bub-a-fg: #191919;
+    --t-bub-a-bd: none;
+    --t-bub-a-sh: none;
+    --t-bub-r: 8px;
+    --t-bub-tail: 3px;
+    --t-bub-font: 15.5px;
+    --t-surf-bg: #ffffff;
+    --t-surf-bd: rgba(0,0,0,0.08);
+    --t-surf-sh: none;
+    --t-surf-bl: none;
+    --t-nav-bg: #ededed;
+    --t-nav-bl: none;
+    --t-panel-bg: #f7f7f7;
+}
+html[data-style="telegram"] {
+    --t-bub-u-bg: #40a7e3;
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 1px 3px rgba(16,35,47,0.18);
+    --t-bub-a-bg: #ffffff;
+    --t-bub-a-fg: #000000;
+    --t-bub-a-bd: none;
+    --t-bub-a-sh: 0 1px 3px rgba(16,35,47,0.12);
+    --t-bub-r: 12px;
+    --t-bub-tail: 3px;
+    --t-bub-font: 15px;
+    --t-surf-bg: #ffffff;
+    --t-surf-bd: rgba(0,0,0,0.08);
+    --t-surf-sh: 0 1px 3px rgba(16,35,47,0.08);
+    --t-surf-bl: none;
+    --t-nav-bg: #ffffff;
+    --t-nav-bl: none;
+    --t-panel-bg: #ffffff;
+}
+html[data-style="imessage"] {
+    --t-bub-u-bg: #007aff;
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: none;
+    --t-bub-a-bg: #e9e9eb;
+    --t-bub-a-fg: #000000;
+    --t-bub-a-bd: none;
+    --t-bub-a-sh: none;
+    --t-bub-r: 18px;
+    --t-bub-tail: 18px;
+    --t-bub-font: 16px;
+    --t-surf-bg: rgba(255,255,255,0.9);
+    --t-surf-bd: rgba(0,0,0,0.06);
+    --t-surf-sh: 0 1px 3px rgba(0,0,0,0.06);
+    --t-surf-bl: blur(18px);
+    --t-nav-bg: rgba(242,242,247,0.95);
+    --t-nav-bl: blur(18px);
+    --t-panel-bg: #ffffff;
+}
+html[data-style="ios"] {
+    --t-bub-u-bg: rgba(45,120,220,0.80);
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 12px 28px -16px rgba(45,120,220,0.62);
+    --t-bub-a-bg: rgba(255,255,255,0.74);
+    --t-bub-a-fg: #2c2c2e;
+    --t-bub-a-bd: 1px solid rgba(255,255,255,0.68);
+    --t-bub-a-sh: 0 10px 26px -16px rgba(15,23,42,0.26);
+    --t-bub-r: 20px;
+    --t-bub-tail: 6px;
+    --t-bub-font: 15px;
+    --t-surf-bg: rgba(255,255,255,0.44);
+    --t-surf-bd: rgba(255,255,255,0.68);
+    --t-surf-sh: 0 18px 44px -16px rgba(15,23,42,0.28);
+    --t-surf-bl: blur(36px) saturate(1.95);
+    --t-nav-bg: rgba(255,255,255,0.36);
+    --t-nav-bl: blur(40px) saturate(1.85);
+    --t-panel-bg: rgba(255,255,255,0.62);
+}
+html[data-style="water"] {
+    --t-bub-u-bg: rgba(56,128,232,0.66);
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 18px 36px -20px rgba(30,90,180,0.58);
+    --t-bub-a-bg: rgba(255,255,255,0.42);
+    --t-bub-a-fg: #2c2c2e;
+    --t-bub-a-bd: 1px solid rgba(255,255,255,0.52);
+    --t-bub-a-sh: 0 16px 38px -20px rgba(15,23,42,0.30);
+    --t-bub-r: 20px;
+    --t-bub-tail: 6px;
+    --t-bub-font: 15px;
+    --t-surf-bg: rgba(255,255,255,0.16);
+    --t-surf-bd: rgba(255,255,255,0.44);
+    --t-surf-sh: 0 18px 44px -16px rgba(15,23,42,0.30);
+    --t-surf-bl: blur(38px) saturate(2.1);
+    --t-nav-bg: rgba(255,255,255,0.24);
+    --t-nav-bl: blur(40px) saturate(1.9);
+    --t-panel-bg: rgba(255,255,255,0.42);
+}
+html[data-style="modern"][data-theme="dark"] {
+    --t-bub-u-bg: #5b9bf0;
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 2px 10px rgba(0,0,0,0.35);
+    --t-bub-a-bg: #2c2c2e;
+    --t-bub-a-fg: #f0f0f5;
+    --t-bub-a-bd: 1px solid rgba(255,255,255,0.06);
+    --t-bub-a-sh: 0 1px 4px rgba(0,0,0,0.3);
+    --t-bub-r: 20px;
+    --t-bub-tail: 6px;
+    --t-bub-font: 15px;
+    --t-surf-bg: rgba(44,44,46,0.88);
+    --t-surf-bd: rgba(255,255,255,0.08);
+    --t-surf-sh: 0 2px 10px rgba(0,0,0,0.35);
+    --t-surf-bl: blur(20px) saturate(1.6);
+    --t-nav-bg: rgba(26,26,30,0.94);
+    --t-nav-bl: blur(20px);
+    --t-panel-bg: #2c2c2e;
+}
+html[data-style="wechat"][data-theme="dark"] {
+    --t-bub-u-bg: #3eb575;
+    --t-bub-u-fg: #0d1f16;
+    --t-bub-u-sh: none;
+    --t-bub-a-bg: #2c2c2c;
+    --t-bub-a-fg: #e8e8e8;
+    --t-bub-a-bd: none;
+    --t-bub-a-sh: none;
+    --t-bub-r: 8px;
+    --t-bub-tail: 3px;
+    --t-bub-font: 15.5px;
+    --t-surf-bg: #242424;
+    --t-surf-bd: rgba(255,255,255,0.08);
+    --t-surf-sh: none;
+    --t-surf-bl: none;
+    --t-nav-bg: #191919;
+    --t-nav-bl: none;
+    --t-panel-bg: #242424;
+}
+html[data-style="telegram"][data-theme="dark"] {
+    --t-bub-u-bg: #8774e1;
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 1px 3px rgba(0,0,0,0.4);
+    --t-bub-a-bg: #212121;
+    --t-bub-a-fg: #e8e8e8;
+    --t-bub-a-bd: none;
+    --t-bub-a-sh: 0 1px 3px rgba(0,0,0,0.3);
+    --t-bub-r: 12px;
+    --t-bub-tail: 3px;
+    --t-bub-font: 15px;
+    --t-surf-bg: #212121;
+    --t-surf-bd: rgba(255,255,255,0.08);
+    --t-surf-sh: 0 1px 3px rgba(0,0,0,0.3);
+    --t-surf-bl: none;
+    --t-nav-bg: #212121;
+    --t-nav-bl: none;
+    --t-panel-bg: #212121;
+}
+html[data-style="imessage"][data-theme="dark"] {
+    --t-bub-u-bg: #0a84ff;
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: none;
+    --t-bub-a-bg: #26262a;
+    --t-bub-a-fg: #e8e8e8;
+    --t-bub-a-bd: none;
+    --t-bub-a-sh: none;
+    --t-bub-r: 18px;
+    --t-bub-tail: 18px;
+    --t-bub-font: 16px;
+    --t-surf-bg: rgba(28,28,30,0.92);
+    --t-surf-bd: rgba(255,255,255,0.08);
+    --t-surf-sh: none;
+    --t-surf-bl: blur(18px);
+    --t-nav-bg: rgba(28,28,30,0.95);
+    --t-nav-bl: blur(18px);
+    --t-panel-bg: #1c1c1e;
+}
+html[data-style="ios"][data-theme="dark"] {
+    --t-bub-u-bg: rgba(52,110,200,0.82);
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 12px 28px -16px rgba(0,0,0,0.6);
+    --t-bub-a-bg: rgba(50,50,56,0.74);
+    --t-bub-a-fg: #f0f0f5;
+    --t-bub-a-bd: 1px solid rgba(255,255,255,0.10);
+    --t-bub-a-sh: 0 12px 30px -18px rgba(0,0,0,0.62);
+    --t-bub-r: 20px;
+    --t-bub-tail: 6px;
+    --t-bub-font: 15px;
+    --t-surf-bg: rgba(48,48,54,0.56);
+    --t-surf-bd: rgba(255,255,255,0.12);
+    --t-surf-sh: 0 18px 44px -16px rgba(0,0,0,0.55);
+    --t-surf-bl: blur(36px) saturate(1.7);
+    --t-nav-bg: rgba(30,30,36,0.52);
+    --t-nav-bl: blur(40px) saturate(1.6);
+    --t-panel-bg: rgba(38,38,44,0.72);
+}
+html[data-style="water"][data-theme="dark"] {
+    --t-bub-u-bg: rgba(56,128,232,0.60);
+    --t-bub-u-fg: #ffffff;
+    --t-bub-u-sh: 0 18px 36px -20px rgba(0,0,0,0.6);
+    --t-bub-a-bg: rgba(44,44,50,0.42);
+    --t-bub-a-fg: #e8e8ed;
+    --t-bub-a-bd: 1px solid rgba(255,255,255,0.12);
+    --t-bub-a-sh: 0 16px 38px -20px rgba(0,0,0,0.6);
+    --t-bub-r: 20px;
+    --t-bub-tail: 6px;
+    --t-bub-font: 15px;
+    --t-surf-bg: rgba(44,44,50,0.26);
+    --t-surf-bd: rgba(255,255,255,0.16);
+    --t-surf-sh: 0 18px 44px -16px rgba(0,0,0,0.6);
+    --t-surf-bl: blur(38px) saturate(1.9);
+    --t-nav-bg: rgba(30,30,36,0.40);
+    --t-nav-bl: blur(40px) saturate(1.7);
+    --t-panel-bg: rgba(38,38,44,0.60);
+}
+@media (prefers-color-scheme: dark) {
+  html[data-style="modern"][data-theme="auto"] {
+      --t-bub-u-bg: #5b9bf0;
+      --t-bub-u-fg: #ffffff;
+      --t-bub-u-sh: 0 2px 10px rgba(0,0,0,0.35);
+      --t-bub-a-bg: #2c2c2e;
+      --t-bub-a-fg: #f0f0f5;
+      --t-bub-a-bd: 1px solid rgba(255,255,255,0.06);
+      --t-bub-a-sh: 0 1px 4px rgba(0,0,0,0.3);
+      --t-bub-r: 20px;
+      --t-bub-tail: 6px;
+      --t-bub-font: 15px;
+      --t-surf-bg: rgba(44,44,46,0.88);
+      --t-surf-bd: rgba(255,255,255,0.08);
+      --t-surf-sh: 0 2px 10px rgba(0,0,0,0.35);
+      --t-surf-bl: blur(20px) saturate(1.6);
+      --t-nav-bg: rgba(26,26,30,0.94);
+      --t-nav-bl: blur(20px);
+      --t-panel-bg: #2c2c2e;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html[data-style="wechat"][data-theme="auto"] {
+      --t-bub-u-bg: #3eb575;
+      --t-bub-u-fg: #0d1f16;
+      --t-bub-u-sh: none;
+      --t-bub-a-bg: #2c2c2c;
+      --t-bub-a-fg: #e8e8e8;
+      --t-bub-a-bd: none;
+      --t-bub-a-sh: none;
+      --t-bub-r: 8px;
+      --t-bub-tail: 3px;
+      --t-bub-font: 15.5px;
+      --t-surf-bg: #242424;
+      --t-surf-bd: rgba(255,255,255,0.08);
+      --t-surf-sh: none;
+      --t-surf-bl: none;
+      --t-nav-bg: #191919;
+      --t-nav-bl: none;
+      --t-panel-bg: #242424;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html[data-style="telegram"][data-theme="auto"] {
+      --t-bub-u-bg: #8774e1;
+      --t-bub-u-fg: #ffffff;
+      --t-bub-u-sh: 0 1px 3px rgba(0,0,0,0.4);
+      --t-bub-a-bg: #212121;
+      --t-bub-a-fg: #e8e8e8;
+      --t-bub-a-bd: none;
+      --t-bub-a-sh: 0 1px 3px rgba(0,0,0,0.3);
+      --t-bub-r: 12px;
+      --t-bub-tail: 3px;
+      --t-bub-font: 15px;
+      --t-surf-bg: #212121;
+      --t-surf-bd: rgba(255,255,255,0.08);
+      --t-surf-sh: 0 1px 3px rgba(0,0,0,0.3);
+      --t-surf-bl: none;
+      --t-nav-bg: #212121;
+      --t-nav-bl: none;
+      --t-panel-bg: #212121;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html[data-style="imessage"][data-theme="auto"] {
+      --t-bub-u-bg: #0a84ff;
+      --t-bub-u-fg: #ffffff;
+      --t-bub-u-sh: none;
+      --t-bub-a-bg: #26262a;
+      --t-bub-a-fg: #e8e8e8;
+      --t-bub-a-bd: none;
+      --t-bub-a-sh: none;
+      --t-bub-r: 18px;
+      --t-bub-tail: 18px;
+      --t-bub-font: 16px;
+      --t-surf-bg: rgba(28,28,30,0.92);
+      --t-surf-bd: rgba(255,255,255,0.08);
+      --t-surf-sh: none;
+      --t-surf-bl: blur(18px);
+      --t-nav-bg: rgba(28,28,30,0.95);
+      --t-nav-bl: blur(18px);
+      --t-panel-bg: #1c1c1e;
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html[data-style="ios"][data-theme="auto"] {
+      --t-bub-u-bg: rgba(52,110,200,0.82);
+      --t-bub-u-fg: #ffffff;
+      --t-bub-u-sh: 0 12px 28px -16px rgba(0,0,0,0.6);
+      --t-bub-a-bg: rgba(50,50,56,0.74);
+      --t-bub-a-fg: #f0f0f5;
+      --t-bub-a-bd: 1px solid rgba(255,255,255,0.10);
+      --t-bub-a-sh: 0 12px 30px -18px rgba(0,0,0,0.62);
+      --t-bub-r: 20px;
+      --t-bub-tail: 6px;
+      --t-bub-font: 15px;
+      --t-surf-bg: rgba(48,48,54,0.56);
+      --t-surf-bd: rgba(255,255,255,0.12);
+      --t-surf-sh: 0 18px 44px -16px rgba(0,0,0,0.55);
+      --t-surf-bl: blur(36px) saturate(1.7);
+      --t-nav-bg: rgba(30,30,36,0.52);
+      --t-nav-bl: blur(40px) saturate(1.6);
+      --t-panel-bg: rgba(38,38,44,0.72);
+  }
+}
+@media (prefers-color-scheme: dark) {
+  html[data-style="water"][data-theme="auto"] {
+      --t-bub-u-bg: rgba(56,128,232,0.60);
+      --t-bub-u-fg: #ffffff;
+      --t-bub-u-sh: 0 18px 36px -20px rgba(0,0,0,0.6);
+      --t-bub-a-bg: rgba(44,44,50,0.42);
+      --t-bub-a-fg: #e8e8ed;
+      --t-bub-a-bd: 1px solid rgba(255,255,255,0.12);
+      --t-bub-a-sh: 0 16px 38px -20px rgba(0,0,0,0.6);
+      --t-bub-r: 20px;
+      --t-bub-tail: 6px;
+      --t-bub-font: 15px;
+      --t-surf-bg: rgba(44,44,50,0.26);
+      --t-surf-bd: rgba(255,255,255,0.16);
+      --t-surf-sh: 0 18px 44px -16px rgba(0,0,0,0.6);
+      --t-surf-bl: blur(38px) saturate(1.9);
+      --t-nav-bg: rgba(30,30,36,0.40);
+      --t-nav-bl: blur(40px) saturate(1.7);
+      --t-panel-bg: rgba(38,38,44,0.60);
+  }
+}
+
+/* ---- 应用：气泡 ---- */
+html[data-style] .bubble {
+    border-radius: var(--t-bub-r, 18px);
+    font-size: var(--t-bub-font, 15px);
+    background-image: none;
+}
+html[data-style] .bubble.user {
+    background-color: var(--t-bub-u-bg);
+    color: var(--t-bub-u-fg);
+    border: none;
+    border-bottom-right-radius: var(--t-bub-tail, 6px);
+    box-shadow: var(--t-bub-u-sh, none);
+}
+html[data-style] .bubble.assistant {
+    background-color: var(--t-bub-a-bg);
+    color: var(--t-bub-a-fg);
+    border: var(--t-bub-a-bd, none);
+    border-bottom-left-radius: var(--t-bub-tail, 6px);
+    box-shadow: var(--t-bub-a-sh, none);
+}
+/* 玻璃主题：叠一层顶部内高光，做出厚度 */
+html[data-style="ios"] .bubble.assistant,
+html[data-style="water"] .bubble.assistant {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.12) 26%, rgba(255,255,255,0.04) 58%, rgba(255,255,255,0) 100%);
+}
+html[data-style="ios"] .bubble.user,
+html[data-style="water"] .bubble.user {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.10) 30%, rgba(255,255,255,0.02) 64%, rgba(255,255,255,0) 100%);
+}
+/* 玻璃厚度：顶部亮边 + 底部反光 + 内描边 + 顶部曲面内发光 + 内侧柔光 */
+html[data-style="ios"] .bubble.assistant,
+html[data-style="water"] .bubble.assistant {
+    box-shadow:
+        var(--t-bub-a-sh, none),
+        inset 0 1px 0 rgba(255,255,255,0.92),
+        inset 0 -1px 0 rgba(255,255,255,0.28),
+        inset 0 0 0 1px rgba(255,255,255,0.18),
+        inset 0 20px 28px -22px rgba(255,255,255,0.95),
+        inset 0 -30px 40px -34px rgba(255,255,255,0.55);
+}
+html[data-style="ios"] .bubble.user,
+html[data-style="water"] .bubble.user {
+    box-shadow:
+        var(--t-bub-u-sh, none),
+        inset 0 1px 0 rgba(255,255,255,0.55),
+        inset 0 -1px 0 rgba(255,255,255,0.16),
+        inset 0 0 0 1px rgba(255,255,255,0.14),
+        inset 0 20px 28px -22px rgba(255,255,255,0.55),
+        inset 0 -30px 40px -34px rgba(255,255,255,0.25);
+}
+
+/* ---- 应用：胶囊 / 输入框 ---- */
+html[data-style] .bar-pill,
+html[data-style] .input-wrapper {
+    background-color: var(--t-surf-bg);
+    background-image: none;
+    border: 1px solid var(--t-surf-bd);
+    box-shadow: var(--t-surf-sh);
+    backdrop-filter: var(--t-surf-bl);
+    -webkit-backdrop-filter: var(--t-surf-bl);
+}
+html[data-style="ios"] .bar-pill,
+html[data-style="ios"] .input-wrapper,
+html[data-style="water"] .bar-pill,
+html[data-style="water"] .input-wrapper {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.11) 28%, rgba(255,255,255,0.03) 62%, rgba(255,255,255,0) 100%);
+    box-shadow: var(--t-surf-sh), inset 0 1px 0 rgba(255,255,255,0.9);
+}
+html[data-style="imessage"] .input-wrapper,
+html[data-style="telegram"] .input-wrapper,
+html[data-style="wechat"] .input-wrapper { border-radius: 22px; }
+
+/* ---- 应用：侧栏 ---- */
+html[data-style] #sidebar {
+    background-color: var(--t-nav-bg);
+    background-image: none;
+    backdrop-filter: var(--t-nav-bl);
+    -webkit-backdrop-filter: var(--t-nav-bl);
+    border-right: 1px solid var(--t-surf-bd);
+}
+html[data-style="ios"] #sidebar,
+html[data-style="water"] #sidebar {
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.08) 100%);
+}
+
+/* ---- 应用：设置面板 ---- */
+html[data-style] .settings-panel {
+    background-color: var(--t-panel-bg);
+    border-left: 1px solid var(--t-surf-bd);
+}
+html[data-style="ios"] .settings-panel,
+html[data-style="water"] .settings-panel {
+    backdrop-filter: var(--t-surf-bl);
+    -webkit-backdrop-filter: var(--t-surf-bl);
+}
+
+/* 无气泡主题 */
+html[data-style="none"] .bubble,
+html[data-style="none"] .bubble.user,
+html[data-style="none"] .bubble.assistant {
+    background: transparent !important;
+    background-image: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+/* ============================================================
+   设置面板：顶部分区导航
+   ============================================================ */
+.settings-tabs {
+    position: sticky;
+    top: 0;
+    display: flex;
+    gap: 4px;
+    padding: 10px 12px 8px;
+    background: var(--t-panel-bg, var(--bg-secondary));
+    border-bottom: 1px solid var(--t-surf-bd, var(--border-color));
+    z-index: 6;
+    flex: 0 0 auto;
+}
+
+.settings-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 2px;
+    border: none;
+    border-radius: 11px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-family: var(--font-body);
+    cursor: pointer;
+    transition: background 0.18s ease, color 0.18s ease;
+    white-space: nowrap;
+}
+
+.settings-tab.active {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.settings-pane { display: none; }
+.settings-pane.active { display: block; }
+
+/* 面板整体改为纵向 flex，tab 固定、内容滚动 */
+.settings-panel { display: flex; flex-direction: column; }
+.settings-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
