@@ -13,8 +13,7 @@ const OUT = 'flicker-out';
 fs.mkdirSync(OUT, { recursive: true });
 
 const variants = [
-    { key: 'texture-tile', css: '' },
-    { key: 'solid-glass', css: ':root{--glass-tex:none!important}' },
+    { key: 'glass', css: '' },
 ];
 
 const browser = await chromium.launch();
