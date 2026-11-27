@@ -302,17 +302,18 @@ const glass = await page.evaluate(() => {
         pill: cs(pill).backdropFilter,
         pillTex: /data:image/.test(cs(pill).backgroundImage || ''),
         attach: cs(bubbles[bubbles.length - 1]).backgroundAttachment,
+        repeat: cs(bubbles[bubbles.length - 1]).backgroundRepeat,
         mode: document.documentElement.getAttribute('data-glass'),
     };
 });
-ok('气泡已改用预模糊纹理', glass.withTex > 0, `tex=${glass.withTex}/${glass.total}`);
+ok('气泡是纯 CSS 玻璃（不含图片资源）', glass.withTex === 0, `tex=${glass.withTex}/${glass.total}`);
 ok('气泡不挂 backdrop-filter（不会降级）', glass.withBlur === 0, `blur=${glass.withBlur}/${glass.total}`);
-ok('纹理是平铺柔光（不随滚动重采样）', /scroll/.test(glass.attach) && !/fixed/.test(glass.attach), glass.attach);
+ok('气泡背景不平铺（不会出现接缝）', !/repeat/.test(glass.repeat) && !/fixed/.test(glass.attach), glass.repeat);
 ok('玻璃样式已同步到根节点', glass.mode === 'ios', glass.mode);
-ok('输入框使用同一张纹理', glass.inputTex === true);
+ok('输入框与气泡同一套材质（不使用图片）', glass.inputTex === false);
 ok('输入框仍有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
 ok('输入框圆角足够大', parseFloat(glass.inputRadius) >= 24, glass.inputRadius);
-ok('胶囊条使用同一张纹理', glass.pillTex === true);
+ok('胶囊条与气泡同一套材质（不使用图片）', glass.pillTex === false);
 
 // 水玻璃预设
 await page.click('#settings-top-btn');
@@ -337,7 +338,7 @@ const water = await page.evaluate(() => {
         mode: document.documentElement.getAttribute('data-glass'),
     };
 });
-ok('水玻璃气泡也用纹理（无 backdrop-filter）', water.found && water.tex && water.blurOn === false, JSON.stringify(water).slice(0, 120));
+ok('水玻璃气泡是纯 CSS 玻璃（无 backdrop-filter）', water.found && !water.tex && water.blurOn === false, JSON.stringify(water).slice(0, 120));
 const alphaOf = (c) => { const m = String(c).match(/rgba?\([^)]*?,\s*([\d.]+)\s*\)/); return m ? parseFloat(m[1]) : 1; };
 ok('水玻璃比毛玻璃更透', alphaOf(water.color) < 0.45, water.color);
 ok('输入框跟随水玻璃样式', alphaOf(water.inputColor) < 0.3, water.inputColor);
