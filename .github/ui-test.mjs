@@ -120,6 +120,15 @@ await page.click('#close-settings');
 await page.waitForTimeout(300);
 
 // ---------- 4. 普通模式对话 ----------
+const defaultModeLabel = String(await page.textContent('#mode-label') || '').trim();
+ok('默认对话模式是 waifu', defaultModeLabel === 'WA', defaultModeLabel);
+// 切回 AI 模式做后续测试
+for (let i = 0; i < 3; i++) {
+    const l = String(await page.textContent('#mode-label') || '').trim();
+    if (l === 'AI') break;
+    await page.click('#mode-btn');
+    await page.waitForTimeout(400);
+}
 await page.evaluate(() => { window.__canned = '这是普通模式的一条完整回复，不应该被拆开。'; });
 await page.evaluate(() => {
     const el = document.querySelector('#chat-input');
