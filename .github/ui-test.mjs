@@ -551,7 +551,8 @@ await page.route('**/free-api.cnmwx.com/**', async route => {
 
 // 填识图 Key 并启用
 await page.click('#settings-top-btn');
-await page.waitForTimeout(400);
+await page.waitForTimeout(500);
+await gotoTab('服务');
 await page.click('#visionprovider-list .btn-small');
 await page.waitForTimeout(300);
 await page.fill('#ve-key', 'sk-or-v1-ci-dummy-key');
