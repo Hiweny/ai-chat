@@ -126,15 +126,15 @@ const defaults = await page.evaluate(() => {
         return {
             mode: (m.settings || {}).defaultMode || '',
             style: (m.settings || {}).bubbleStyle || '',
-            aiAvatar: (m.aiProfile || {}).avatar || '',
-            userAvatar: (m.userProfile || {}).avatar || '',
+            imageGen: !!(m.settings || {}).imageGenEnabled,
+            avatarCount: [ (m.aiProfile || {}).avatar, (m.userProfile || {}).avatar ].filter(Boolean).length,
         };
     } catch (e) { return {}; }
 });
 ok('默认对话模式是 waifu', defaults.mode === 'waifu', defaults.mode);
 ok('默认气泡样式是现代简约', defaults.style === 'modern', defaults.style);
-ok('默认 AI 头像已设置', String(defaults.aiAvatar).includes('t02fdce69'), String(defaults.aiAvatar).slice(0, 40));
-ok('默认用户头像已设置', String(defaults.userAvatar).includes('t021d9229'), String(defaults.userAvatar).slice(0, 40));
+ok('出厂不预设头像', defaults.avatarCount === 0, String(defaults.avatarCount));
+ok('未填生图 Key 时生图默认关闭', defaults.imageGen === false, String(defaults.imageGen));
 // 切回 AI 模式做后续测试
 for (let i = 0; i < 3; i++) {
     const l = String(await page.textContent('#mode-label') || '').trim();
@@ -157,7 +157,7 @@ const avatarSrc = await page.evaluate(() => {
     const imgs = [...document.querySelectorAll('.msg-row .avatar img')].map(i => i.getAttribute('src') || '');
     return imgs;
 });
-ok('默认头像已生效', avatarSrc.some(s => s.includes('qhmsg.com')), JSON.stringify(avatarSrc.slice(0, 2)));
+ok('出厂无头像时不渲染头像', avatarSrc.length === 0, JSON.stringify(avatarSrc));
 const aiText = await page.locator('.msg-row.assistant .bubble-content').last().textContent();
 ok('普通模式不拆分多消息', !String(aiText).includes('|||'), JSON.stringify(String(aiText).slice(0, 60)));
 
