@@ -58,7 +58,7 @@
     let settings = {
         maxPromptLength: 80000,
         warnThreshold: 56000,
-        recentRounds: 0,          // 0 = 不限，全部历史都发给 AI
+        recentRounds: 10,         // 压缩时保留最近 N 轮原文，更早的压成摘要
         autoCompact: true,
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         bubbleStyle: 'modern',
@@ -294,10 +294,10 @@
             }
         } catch (e) { console.error('读取设置失败', e); }
 
-        // ---- 1.5 迁移：旧的「保留最近轮数=10」会静默截断发送历史，一次性放开 ----
-        if (!settings.turnQuotaMigrated) {
-            if (!settings.recentRounds || settings.recentRounds === 10) settings.recentRounds = 0;
-            settings.turnQuotaMigrated = true;
+        // ---- 1.5 修正上一版误改：保留轮数曾被写成 0，恢复成 10 ----
+        if (settings.turnQuotaMigrated !== 2) {
+            if (settings.turnQuotaMigrated === true && !parseInt(settings.recentRounds, 10)) settings.recentRounds = 10;
+            settings.turnQuotaMigrated = 2;
         }
 
         // ---- 2. 从旧版 localStorage 迁移（只做一次） ----
@@ -519,9 +519,8 @@
 每次回复最多一张。prompt 用英文，写清人物外貌、服装、表情、动作、环境、光线、镜头与风格（如 photorealistic, selfie, natural light, 35mm）。
 不要在正文里提这个标签，它会自动变成图片。`,
 
-        time: `【你心里有数的时间】现在大约是 {time}。
-你清楚今天是几号、几点、星期几。聊天时如果需要这份感知，自然用上就好——对方说"好困"你知道是深夜，说"好久没见"你知道隔了多久，聊到日期也不会说错。
-不要主动报时间，不要在回复里提它，也不要说"根据系统时间"之类的话。`,
+        time: `【当前时间】现在大约是 {time}。
+你知道今天几号、星期几、大概几点。需要时自然用上（对方说"好困"你知道是深夜），但不要主动报时间，也不要说"根据系统时间"。`,
 
         get summary() { return SUMMARY_INSTRUCTION; },
 
@@ -603,52 +602,54 @@
     }
 
     // 系统设定 → 现在 → 历史摘要 → waifu 协议 → 生图协议 → 打断说明
+    // 头部：只放「稳定指令」，按固定顺序排列，块与块之间空一行
+    // 1 人设 → 2 时间 → 3 历史摘要 → 4 回复规则（聊天方式 / 生图 / 搜索 / 打断）
     function headBlocks() {
         const parts = [];
         const sys = activeSystemPrompt();
         if (sys) parts.push(`【系统设定】\n${sys}\n【系统设定结束】`);
         parts.push(timeBlock());
         const summary = getSummary();
-        if (summary.trim()) parts.push(`【历史摘要】\n${summary.trim()}\n【摘要结束】`);
-        if (getMessages().length > 1) {
-            parts.push('【格式说明】历史对话中，"User:" 开头的是对方说的话，"Assistant:" 开头的是你自己之前说过的话。不要把自己的话当成对方说的。');
-        }
+        if (summary.trim()) parts.push(`【历史摘要】\n${summary.trim()}\n【历史摘要结束】`);
+
         if (isWaifuMode()) parts.push(getPrompt('waifu'));
-        if (settings.searchEnabled && currentProvider().type !== 'openai') parts.push(getPrompt('search'));
         const ip = imageProtocol();
         if (ip) parts.push(ip);
+        if (settings.searchEnabled && currentProvider().type !== 'openai') parts.push(getPrompt('search'));
         const ib = interruptBlock();
         if (ib) parts.push(ib);
+
         return parts.join('\n\n');
     }
 
     // 历史消息：排除本轮（已 push 的那条），只取最近 N 轮。
     // 注意按「轮」算而不是按条数——waifu 模式一条回复会拆成好几条 AI 消息
+    // 历史消息：全部带上，只把「本轮那条」摘掉。
+    // 「保留最近轮数」是压缩用的，不是发送条数——这里不做任何轮数截断。
     function historyMsgs(userMsg) {
-        let msgs = getMessages().slice();
-        if (userMsg && msgs.length > 0 && msgs[msgs.length - 1].role === 'user') msgs = msgs.slice(0, -1);
-        const rounds = parseInt(settings.recentRounds, 10) || 0;
-        if (rounds <= 0) return msgs;      // 0 = 不限：不再静默截断历史
-        let start = msgs.length;
-        let r = 0;
-        while (start > 0 && r < rounds) {
-            start--;
-            if (msgs[start].role === 'user') r++;
-        }
-        return msgs.slice(start);
+        const msgs = getMessages().slice();
+        if (!userMsg || !msgs.length) return msgs;
+        const last = msgs[msgs.length - 1];
+        if (last.role !== 'user') return msgs;
+        const target = String(userMsg);
+        if (String(last.content || '') === target || String(msgText(last)) === target) msgs.pop();
+        return msgs;
     }
 
     function buildPrompt(userMsg, extra) {
         const parts = [headBlocks()];
-        for (const m of historyMsgs(userMsg)) {
-            parts.push((m.role === 'user' ? 'User: ' : 'Assistant: ') + msgText(m));
+        const hist = historyMsgs(userMsg);
+        if (hist.length) {
+            parts.push('【对话历史】下面每一行：User 是对方说的话，Assistant 是你自己之前说的话。\n'
+                + hist.map(m => (m.role === 'user' ? 'User: ' : 'Assistant: ') + msgText(m)).join('\n'));
         }
         if (userMsg) {
-            parts.push(`User: ${userMsg}`);
-            if (extra) parts.push(extra);
-            parts.push('Assistant:');
+            const turn = [`User: ${userMsg}`];
+            if (extra) turn.push(extra);
+            turn.push('Assistant:');
+            parts.push('【本轮】\n' + turn.join('\n'));
         }
-        return parts.join('\n');
+        return parts.join('\n\n');
     }
 
     // OpenAI 兼容接口用 messages 结构
@@ -1059,6 +1060,15 @@
         return cv.toDataURL('image/jpeg', 0.82);
     }
 
+    // 去掉模型偶尔塞进正文里的思考块/思考前缀
+    function stripThinkingText(t) {
+        let s = String(t == null ? '' : t);
+        s = s.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '');
+        s = s.replace(/<\|?begin_of_thought\|?>[\s\S]*?<\|?end_of_thought\|?>/gi, '');
+        s = s.replace(/^\s*(思考过程|思考|推理过程|分析过程|Thinking Process|Reasoning|Analysis)\s*[:：]\s*/i, '');
+        return s.trim();
+    }
+
     async function describeImage(dataUrl) {
         const p = currentVisionProvider();
         if (!p) throw new Error('没有配置识图接口');
@@ -1091,9 +1101,16 @@
         }
         const data = await resp.json();
         const msg = data && data.choices && data.choices[0] && data.choices[0].message;
-        let out = msg ? (msg.content || msg.reasoning_content || msg.reasoning || '') : '';
-        out = String(out).trim();
-        if (!out) throw new Error('识图接口没有返回内容');
+        // 只取正文：推理模型的 reasoning / reasoning_content 是思考过程，绝不能混进描述
+        let raw = msg ? msg.content : '';
+        if (Array.isArray(raw)) {
+            raw = raw.map(p => (typeof p === 'string' ? p : ((p && (p.text || p.content)) || ''))).join('');
+        }
+        const out = stripThinkingText(raw);
+        if (!out) {
+            const onlyThink = msg && (msg.reasoning || msg.reasoning_content);
+            throw new Error(onlyThink ? '识图模型只给了思考过程、没有正文，换一个模型试试' : '识图接口没有返回内容');
+        }
         return out;
     }
 
@@ -2446,7 +2463,7 @@ ${chunkText}
         const conv = currentConv();
         if (!conv) { if (manual) showToast('当前没有对话可压缩', 'warning'); return false; }
 
-        const keepRounds = 4;   // 压缩后固定保留最近 4 轮原文
+        const keepRounds = Math.max(1, parseInt(settings.recentRounds, 10) || 10);
         const total = conv.messages.length;
         let keepStart = total;
         let rr = 0;
@@ -3233,6 +3250,7 @@ ${chunkText}
         $('#prompt-image').value = getPrompt('image');
         $('#prompt-summary').value = getPrompt('summary');
         $('#prompt-vision').value = getPrompt('vision');
+        if ($('#prompt-search')) $('#prompt-search').value = getPrompt('search');
         const spStatus = $('#systemprompt-status');
         if (spStatus) spStatus.textContent = '';
         $('#blur-val').textContent = settings.backgroundBlur;
@@ -3250,7 +3268,7 @@ ${chunkText}
     // 把界面上的提示词写回 settings（和默认值相同就存空，跟随默认演进）
     function savePromptsFromUI() {
         settings.prompts = settings.prompts || {};
-        ['waifu', 'image', 'summary', 'time', 'vision'].forEach(k => {
+        ['waifu', 'image', 'summary', 'time', 'vision', 'search'].forEach(k => {
             const el = $('#prompt-' + k);
             if (!el) return;
             const v = el.value.trim();
