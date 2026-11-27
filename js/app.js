@@ -1085,21 +1085,31 @@
             headers['HTTP-Referer'] = location.origin || 'https://hiweny.github.io';
             headers['X-Title'] = 'AI Chat';
         }
-        const resp = await fetch(url, {
-            method: 'POST', headers,
-            body: JSON.stringify({
-                model: p.model,
-                messages: [{
-                    role: 'user',
-                    content: [
-                        { type: 'text', text: getPrompt('vision') },
-                        { type: 'image_url', image_url: { url: dataUrl } },
-                    ],
-                }],
-                // 多模态推理模型会先用大量 token 思考，给少了正文会被截断成空
-                max_tokens: 2000,
-            }),
-        });
+        const ac = new AbortController();
+        const tid = setTimeout(() => ac.abort(), 60000);
+        let resp;
+        try {
+            resp = await fetch(url, {
+                method: 'POST', headers, signal: ac.signal,
+                body: JSON.stringify({
+                    model: p.model,
+                    messages: [{
+                        role: 'user',
+                        content: [
+                            { type: 'text', text: getPrompt('vision') },
+                            { type: 'image_url', image_url: { url: dataUrl } },
+                        ],
+                    }],
+                    // 多模态推理模型会先用大量 token 思考，给少了正文会被截断成空
+                    max_tokens: 2000,
+                }),
+            });
+        } catch (e) {
+            if (e && e.name === 'AbortError') throw new Error('识图超时（60 秒没有响应）');
+            throw e;
+        } finally {
+            clearTimeout(tid);
+        }
         if (!resp.ok) {
             const t = await resp.text().catch(() => '');
             throw new Error('识图接口 HTTP ' + resp.status + ' ' + t.slice(0, 120));
@@ -1647,9 +1657,17 @@
             setBusyHint(shots.length > 1 ? `正在识图（1/${shots.length}）…` : '正在识图…');
             try {
                 const descs = [];
+                let failed = 0;
                 for (let i = 0; i < shots.length; i++) {
                     if (shots.length > 1) setBusyHint(`正在识图（${i + 1}/${shots.length}）…`);
-                    descs.push(await describeImage(shots[i].dataUrl));
+                    try {
+                        descs.push(await describeImage(shots[i].dataUrl));
+                    } catch (e) {
+                        failed++;
+                        const msg = String(e && e.message) || '未知错误';
+                        descs.push(shots.length > 1 ? `（第 ${i + 1} 张没能识别：${msg}）` : `（这张图没能识别：${msg}）`);
+                        if (failed < shots.length) showToast('有图片识别失败，已跳过继续', 'error', 2200);
+                    }
                 }
                 let block = descs.length === 1
                     ? '【图片内容】\n' + descs[0]
@@ -2568,6 +2586,8 @@ ${chunkText}
             if (abortController) abortController.abort();
         }
         if (activeConvId === id) { closeSidebar(); return; }
+        // 待发图片属于上一条对话，切走就清掉，避免串到别的对话里
+        if (pendingImages.length) { pendingImages.splice(0); renderAttachPreview(); }
         activeConvId = id;
         saveAll();
         rebuildMessagesUI();
