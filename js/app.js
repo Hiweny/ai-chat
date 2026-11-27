@@ -1098,7 +1098,8 @@ Example structure:
         return s.trim();
     }
 
-    async function describeImage(dataUrl) {
+    async function describeImage(dataUrl, maxTok) {
+        const budget = maxTok || 4000;
         const p = currentVisionProvider();
         if (!p) throw new Error('没有配置识图接口');
         const base = String(p.baseUrl || '').replace(/\/+$/, '');
@@ -1124,8 +1125,8 @@ Example structure:
                             { type: 'image_url', image_url: { url: dataUrl } },
                         ],
                     }],
-                    // 多模态推理模型会先用大量 token 思考，给少了正文会被截断成空
-                    max_tokens: 2000,
+                    // 多模态推理模型会先用大量 token 思考，预算给少了正文会被截断成空
+                    max_tokens: budget,
                 }),
             });
         } catch (e) {
@@ -1139,7 +1140,9 @@ Example structure:
             throw new Error('识图接口 HTTP ' + resp.status + ' ' + t.slice(0, 120));
         }
         const data = await resp.json();
-        const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+        const choice = (data && data.choices && data.choices[0]) || {};
+        const msg = choice.message || {};
+        const finish = choice.finish_reason;
         // 只取正文：推理模型的 reasoning / reasoning_content 是思考过程，绝不能混进描述
         let raw = msg ? msg.content : '';
         if (Array.isArray(raw)) {
@@ -1147,8 +1150,14 @@ Example structure:
         }
         const out = stripThinkingText(raw);
         if (!out) {
-            const onlyThink = msg && (msg.reasoning || msg.reasoning_content);
-            throw new Error(onlyThink ? '识图模型只给了思考过程、没有正文，换一个模型试试' : '识图接口没有返回内容');
+            // 思考把 token 吃光了：加倍预算再试一次，别让用户看到"只有思考"
+            if (finish === 'length' && budget < 8000) {
+                return describeImage(dataUrl, budget * 2);
+            }
+            const onlyThink = msg.reasoning || msg.reasoning_content;
+            throw new Error(onlyThink
+                ? '识图模型只输出了思考、没有正文（可用 max_tokens 更大时重试或换模型）'
+                : '识图接口没有返回内容');
         }
         return out;
     }
@@ -1270,22 +1279,8 @@ Example structure:
             return;
         } else if (msg.role === 'user') {
             if (Array.isArray(msg.images) && msg.images.length) {
-                const wrap = document.createElement('div');
-                wrap.className = 'bubble-images';
-                contentDiv.appendChild(wrap);
-                msg.images.forEach(id => {
-                    imgGet(id).then(rec => {
-                        if (!rec || !rec.data) return;
-                        const im = document.createElement('img');
-                        im.src = rec.data;
-                        im.alt = '';
-                        im.addEventListener('click', () => openImageViewer(rec.data));
-                        wrap.appendChild(im);
-                    }).catch(() => { });
-                });
-                const txt = document.createElement('div');
-                txt.textContent = msg.content;
-                contentDiv.appendChild(txt);
+                if (msg.content && msg.content !== '[图片]') contentDiv.textContent = msg.content;
+                else bubble.classList.add('bubble-empty');   // 只发了图：气泡留空不显示
             } else {
                 contentDiv.textContent = msg.content;
             }
@@ -1315,6 +1310,23 @@ Example structure:
         }
 
         col.appendChild(bubble);
+
+        // 用户发的图片：缩小挂在气泡下方，不塞进气泡里
+        if (msg.role === 'user' && Array.isArray(msg.images) && msg.images.length) {
+            const wrap = document.createElement('div');
+            wrap.className = 'msg-images';
+            msg.images.forEach(id => {
+                imgGet(id).then(rec => {
+                    if (!rec || !rec.data) return;
+                    const im = document.createElement('img');
+                    im.src = rec.data;
+                    im.alt = '';
+                    im.addEventListener('click', () => openImageViewer(rec.data));
+                    wrap.appendChild(im);
+                }).catch(() => { });
+            });
+            col.appendChild(wrap);
+        }
 
         // 时间戳放到气泡下方（不再塞进气泡里）
         if (settings.showTimestamp && msg.timestamp) {
