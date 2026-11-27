@@ -71,7 +71,7 @@ ok('标题占满中间空隙', geo.T.w > 60, `w=${geo.T.w}`);
 await page.screenshot({ path: path.join(OUT, '02-topbar.jpg'), type: 'jpeg', quality: 72, clip: { x: 0, y: 0, width: 390, height: 80 } });
 
 const avatarCount = await page.locator('.msg-row .avatar').count();
-ok('未设置头像时不显示头像', avatarCount === 0, `count=${avatarCount}`);
+ok('首页没有消息时不渲染头像占位', avatarCount === 0, `count=${avatarCount}`);
 
 // ---------- 3. 设置面板 ----------
 await page.click('#settings-top-btn');
@@ -123,6 +123,11 @@ await page.waitForTimeout(2500);
 await page.screenshot({ path: path.join(OUT, '05-chat-normal.jpg'), type: 'jpeg', quality: 72 });
 const msgCount = await page.locator('.msg-row').count();
 ok('普通模式生成了一条 AI 回复', msgCount >= 2, `rows=${msgCount}`);
+const avatarSrc = await page.evaluate(() => {
+    const imgs = [...document.querySelectorAll('.msg-row .avatar img')].map(i => i.getAttribute('src') || '');
+    return imgs;
+});
+ok('默认头像已生效', avatarSrc.some(s => s.includes('qhmsg.com')), JSON.stringify(avatarSrc.slice(0, 2)));
 const aiText = await page.locator('.msg-row.assistant .bubble-content').last().textContent();
 ok('普通模式不拆分多消息', !String(aiText).includes('|||'), JSON.stringify(String(aiText).slice(0, 60)));
 
