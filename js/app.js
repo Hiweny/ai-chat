@@ -2590,6 +2590,11 @@ ${chunkText}
     }
 
     // ========== 主题与背景 ==========
+    function isDarkNow() {
+        return settings.colorScheme === 'dark' ||
+            (settings.colorScheme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+
     function applyTheme() {
         document.documentElement.setAttribute('data-theme', settings.colorScheme);
     }
