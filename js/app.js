@@ -49,8 +49,9 @@
     let abortController = null;
     let searchQuery = '';
 
-    const DEFAULT_AVATAR_USER = 'https://ps.ssl.qhmsg.com/t021d922984a57bfbc6.jpg';
-    const DEFAULT_AVATAR_AI = 'https://ps.ssl.qhmsg.com/t02fdce69cbf85f1dd9.jpg';
+    // 出厂不预设头像，也不预设壁纸
+    const DEFAULT_AVATAR_USER = '';
+    const DEFAULT_AVATAR_AI = '';
     let userProfile = { avatar: DEFAULT_AVATAR_USER };
     let aiProfile = { avatar: DEFAULT_AVATAR_AI };
 
@@ -61,7 +62,7 @@
         autoCompact: true,
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         bubbleStyle: 'modern',
-        backgroundImage: 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg',
+        backgroundImage: '',
         backgroundBlur: 0,
         backgroundBrightness: 100,
         // 多供应商
@@ -70,7 +71,7 @@
         imageProviderId: 'gitee',
         imageProviders: [],
         selfPortrait: '',
-        imageGenEnabled: true,
+        imageGenEnabled: false,
         // 模式：跟随对话，这里只记新对话的默认值
         defaultMode: 'waifu',
         waifuMergeDelay: 1400,
@@ -504,9 +505,14 @@
         return v || PROMPT_DEFAULTS[key] || '';
     }
 
+    function hasImageKey() {
+        const p = currentImageProvider();
+        return !!(p && String(p.apiKey || '').trim());
+    }
+
     function imageProtocol() {
         if (!settings.imageGenEnabled) return '';
-        if (!currentImageProvider()) return '';
+        if (!hasImageKey()) return '';
         const base = getPrompt('image');
         const portrait = (settings.selfPortrait || '').trim();
         if (portrait) return base + `\n\n【你的固定外貌】${portrait}（画面里出现"你"时必须符合）`;
@@ -529,7 +535,8 @@
     function activeSystemPrompt(conv) {
         const c = conv || currentConv();
         const own = c && c.systemPrompt ? String(c.systemPrompt).trim() : '';
-        return own || (settings.systemPrompt || '').trim();
+        // 三层兜底：对话级 → 全局设置 → 出厂默认，保证永远有一个人格
+        return own || (settings.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT;
     }
 
     function msgText(m) {
@@ -1089,7 +1096,7 @@
             } else {
                 aiRow.remove();
             }
-            if (imgPrompt) handleGenImage(imgPrompt);
+            if (imgPrompt && settings.imageGenEnabled && hasImageKey()) handleGenImage(imgPrompt);
 
         } catch (err) {
             clearTimeout(timeoutId);
@@ -1232,7 +1239,7 @@
             } else {
                 aiRow.remove();
             }
-            if (imgPrompt) handleGenImage(imgPrompt);
+            if (imgPrompt && settings.imageGenEnabled && hasImageKey()) handleGenImage(imgPrompt);
 
         } catch (err) {
             clearTimeout(timeoutId);
@@ -2160,6 +2167,7 @@ ${chunkText}
             sel2.innerHTML = settings.imageProviders.map(p => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
             sel2.value = settings.imageProviderId;
         }
+        if (typeof refreshImageToggle === 'function') refreshImageToggle();
     }
 
     function renderProviderList() {
@@ -2190,7 +2198,9 @@ ${chunkText}
                     e.stopPropagation();
                     if (!confirm(`删除供应商「${p.name}」？`)) return;
                     settings.providers = settings.providers.filter(x => x.id !== p.id);
-                    if (settings.chatProviderId === p.id) settings.chatProviderId = settings.providers[0].id;
+                    // 删掉最后一个时必须兜底，否则 providers[0] 为 undefined 会崩
+                    if (!settings.providers.length) settings.providers = JSON.parse(JSON.stringify(DEFAULT_PROVIDERS));
+                    if (!settings.providers.some(x => x.id === settings.chatProviderId)) settings.chatProviderId = settings.providers[0].id;
                     saveAll(); renderProviderList(); renderProviderSelects();
                     showToast('已删除', 'info');
                 });
@@ -2266,7 +2276,9 @@ ${chunkText}
                     e.stopPropagation();
                     if (!confirm(`删除生图接口「${p.name}」？`)) return;
                     settings.imageProviders = settings.imageProviders.filter(x => x.id !== p.id);
-                    if (settings.imageProviderId === p.id) settings.imageProviderId = settings.imageProviders[0].id;
+                    if (!settings.imageProviders.length) settings.imageProviders = JSON.parse(JSON.stringify(DEFAULT_IMAGE_PROVIDERS));
+                    if (!settings.imageProviders.some(x => x.id === settings.imageProviderId)) settings.imageProviderId = settings.imageProviders[0].id;
+                    settings.imageGenEnabled = false;
                     saveAll(); renderImageProviderList(); renderProviderSelects();
                     showToast('已删除', 'info');
                 });
@@ -2420,6 +2432,20 @@ ${chunkText}
         body.dataset.grouped = '1';
     }
 
+    function refreshImageToggle() {
+        const el = $('#set-imagegen');
+        const hint = $('#imagegen-hint');
+        if (!el) return;
+        const ok = hasImageKey();
+        el.checked = !!settings.imageGenEnabled && ok;
+        el.disabled = !ok;
+        if (hint) {
+            hint.textContent = ok
+                ? '已配置生图 Key，可按需开启。'
+                : '未填生图 API Key，生图已关闭。在下方点「编辑」填入 Key 后即可启用。';
+        }
+    }
+
     function updateSelfPortraitHint() {
         const ta = $('#set-selfportrait');
         const hint = $('#selfportrait-hint');
@@ -2450,10 +2476,10 @@ ${chunkText}
         updateSelfPortraitHint();
         $('#set-autocompact').checked = !!settings.autoCompact;
         $('#set-waifu').checked = isWaifuMode();
-        $('#set-imagegen').checked = !!settings.imageGenEnabled;
+        refreshImageToggle();
         $('#set-selfportrait').value = settings.selfPortrait || '';
         $('#set-selfportrait').addEventListener('input', updateSelfPortraitHint);
-        $('#set-systemprompt').value = settings.systemPrompt || '';
+        $('#set-systemprompt').value = (settings.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT;
         $('#prompt-time').value = getPrompt('time');
         $('#prompt-waifu').value = getPrompt('waifu');
         $('#prompt-image').value = getPrompt('image');
@@ -2574,7 +2600,8 @@ ${chunkText}
         const STYLES = ['modern', 'wechat', 'telegram', 'imessage', 'ios', 'water', 'none'];
         const preset = STYLES.includes(settings.bubbleStyle) ? settings.bubbleStyle : 'modern';
         document.documentElement.setAttribute('data-style', preset);
-        const wf = isWaifuMode();
+        // 还没有对话时，标签反映「新对话默认模式」，不然会显得点了没反应
+        const wf = currentConv() ? isWaifuMode() : (settings.defaultMode === 'waifu');
         const label = $('#mode-label');
         if (label) label.textContent = wf ? 'WA' : 'AI';
         const btn = $('#mode-btn');
@@ -2605,6 +2632,14 @@ ${chunkText}
         clearTimeout(waifu.timer);
         waifu.timer = null;
         if (isGenerating && abortController) abortController.abort();
+        // 还没有对话时切换的是「新对话的默认模式」，否则点了没反应
+        if (!currentConv()) {
+            settings.defaultMode = next ? 'waifu' : 'normal';
+            applyMode();
+            saveAll();
+            showToast(next ? '新对话将使用 Waifu 模式' : '新对话将使用普通模式', 'info', 1600);
+            return;
+        }
         applyWaifuFlag(next);
         showToast(next ? '已切换到 Waifu 模式（本对话）' : '已切换到普通模式（本对话）', 'info', 1600);
     }
@@ -3184,20 +3219,24 @@ ${chunkText}
             settings._defaultsV3 = true;
         }
 
-        // v5：默认头像 + 默认 waifu 模式
+        // v5：默认 waifu 模式
         if (!settings._defaultsV5) {
-            if (!userProfile.avatar) userProfile.avatar = DEFAULT_AVATAR_USER;
-            if (!aiProfile.avatar) aiProfile.avatar = DEFAULT_AVATAR_AI;
             settings.defaultMode = 'waifu';
             Object.values(conversations).forEach(c => { if (c && c.mode !== 'waifu') c.mode = 'waifu'; });
             settings._defaultsV5 = true;
             saveAll();
         }
 
-        // v4：换默认壁纸（这张图作为新的出厂背景）
-        if (!settings._defaultsV4) {
-            settings.backgroundImage = 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg';
-            settings._defaultsV4 = true;
+        // v6：撤掉之前写进去的默认头像/默认壁纸；没填生图 key 就关掉生图
+        if (!settings._defaultsV6) {
+            const OLD_AI = 'https://ps.ssl.qhmsg.com/t02fdce69cbf85f1dd9.jpg';
+            const OLD_USER = 'https://ps.ssl.qhmsg.com/t021d922984a57bfbc6.jpg';
+            const OLD_BG = 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg';
+            if (userProfile.avatar === OLD_USER) userProfile.avatar = '';
+            if (aiProfile.avatar === OLD_AI) aiProfile.avatar = '';
+            if (settings.backgroundImage === OLD_BG) settings.backgroundImage = '';
+            if (!hasImageKey()) settings.imageGenEnabled = false;
+            settings._defaultsV6 = true;
             saveAll();
         }
         ensureProviders();
