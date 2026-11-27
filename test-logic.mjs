@@ -137,6 +137,11 @@ T.setActive(cid2);
 T.settings.recentRounds = 1;
 const pw = T.buildPrompt('R3U');
 ok('waifu 下按轮截取：只带最后一轮的 AI 多条消息', pw.includes('R2A1') && pw.includes('R2A2') && !pw.includes('R1A1'), JSON.stringify(pw.slice(-200)));
+// 0 = 不限：历史一条都不能少（曾经默认 10 轮静默截断）
+T.settings.recentRounds = 0;
+T.setActive(cid2);
+const pAll = T.buildPrompt('R3U');
+ok('轮数=0 时历史不截断', pAll.includes('R1U') && pAll.includes('R1A1') && pAll.includes('R2A1'), JSON.stringify(pAll.slice(0, 160)));
 T.settings.recentRounds = 10;
 T.setActive(cid);
 
@@ -223,8 +228,34 @@ ok('打断说明进入 prompt', T.buildPrompt('U2').includes('我还没说完的
 T.waifu.remainder = '';
 T.conversations[cid].mode = 'normal';
 
+// 识图：图片描述必须作为「本轮用户消息」进入 prompt（曾经只存进 msg.ctx，本轮 prompt 里没有）
+{
+    const cidImg = 'cimg';
+    T.conversations[cidImg] = { id: cidImg, title: 'i', summary: '', messages: [], createdAt: 1, updatedAt: 1 };
+    T.setActive(cidImg);
+    const ctxText = '这张图是什么\n\n【图片内容】\n画面中央是一个红色圆形';
+    const m = { role: 'user', content: '这张图是什么', ctx: ctxText, timestamp: 1, id: 'mimg' };
+    T.conversations[cidImg].messages.push(m);
+    const pImg = T.buildPrompt(ctxText);
+    ok('图片描述进入本轮 prompt', pImg.includes('【图片内容】') && pImg.includes('红色圆形'));
+    ok('图片描述不以展示文本代替', !/User: 这张图是什么\nAssistant:/.test(pImg));
+}
+
+// 搜索协议只注入给免费接口，OpenAI 兼容走原生 tools
+{
+    T.settings.searchEnabled = true;
+    T.settings.providers = [{ id: 'free', name: 'f', type: 'free', baseUrl: 'x', apiKey: '', model: '' }];
+    T.settings.chatProviderId = 'free';
+    ok('免费接口注入文本搜索协议', T.buildPrompt('U').includes('@@search@@'));
+    T.settings.providers.push({ id: 'oa', name: 'o', type: 'openai', baseUrl: 'https://api.test/v1', apiKey: 'k', model: 'm' });
+    T.settings.chatProviderId = 'oa';
+    ok('OpenAI 兼容接口不注入文本协议（改走原生 tools）', !T.buildPrompt('U').includes('@@search@@'));
+    T.settings.searchEnabled = false;
+}
+
 console.log('\n============ 结果 ============');
 for (const [st, n, e] of R) console.log(`${st}  ${n}${e ? '  (' + e + ')' : ''}`);
 const fails = R.filter(r => r[0] === 'FAIL').length;
 console.log(`\n合计 ${R.length} 项，失败 ${fails} 项`);
 process.exit(fails ? 1 : 0);
+
