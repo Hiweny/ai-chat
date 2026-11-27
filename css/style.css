@@ -267,7 +267,7 @@ html, body {
     height: 100dvh;
     background-color: transparent;
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0.26) 100%);
+        linear-gradient(180deg, rgba(255,255,255,0.40) 0%, rgba(255,255,255,0.32) 40%, rgba(255,255,255,0.24) 100%);
     background-size: 100% 100%;
     background-position: center;
     background-repeat: no-repeat;
@@ -551,7 +551,7 @@ html, body {
     border-radius: 999px;
     background-color: var(--glass-tint);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.04) 52%, rgba(255,255,255,0) 100%);
+        linear-gradient(180deg, rgba(255,255,255,0.38) 0%, rgba(255,255,255,0.20) 22%, rgba(255,255,255,0.09) 50%, rgba(255,255,255,0.03) 76%, rgba(255,255,255,0) 100%);
     background-size: 100% 100%;
     background-position: center;
     background-repeat: no-repeat;
@@ -862,62 +862,80 @@ html, body {
     box-shadow: var(--shadow-xs);
 }
 
-/* ---- 毛玻璃：厚玻璃 ---- */
+/* ---- 毛玻璃：厚玻璃 ----
+   背景只用「一条从头到尾单调递减的平滑渐变」，没有任何转折点/停靠点，
+   所以不会出现视觉上的"分段/色带"；同时不透明度整体调高，背景不抢戏。 */
 .bubble.ios.assistant {
-    background-color: rgba(255, 255, 255, 0.62);
+    background-color: rgba(255, 255, 255, 0.74);
     background-image:
-        radial-gradient(140% 100% at 12% 0%, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.10) 38%, rgba(255,255,255,0) 68%),
-        linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 55%, rgba(0,0,0,0.015) 100%);
+        linear-gradient(180deg,
+            rgba(255,255,255,0.42) 0%,
+            rgba(255,255,255,0.26) 22%,
+            rgba(255,255,255,0.12) 46%,
+            rgba(255,255,255,0.04) 72%,
+            rgba(255,255,255,0) 100%);
     color: var(--text-primary);
     border: 1px solid var(--glass-edge);
     border-bottom-left-radius: 6px;
     box-shadow:
-        0 10px 26px -16px rgba(15,23,42,0.30),
-        inset 0 1px 0 rgba(255,255,255,0.80),
-        inset 0 0 0 1px rgba(255,255,255,0.14);
+        0 10px 26px -16px rgba(15,23,42,0.26),
+        inset 0 1px 0 rgba(255,255,255,0.85),
+        inset 0 0 0 1px rgba(255,255,255,0.16);
 }
 
 .bubble.ios.user {
-    background-color: rgba(45, 120, 220, 0.68);
+    background-color: rgba(45, 120, 220, 0.80);
     background-image:
-        radial-gradient(140% 100% at 12% 0%, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0) 70%),
-        linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 60%, rgba(0,0,0,0.03) 100%);
+        linear-gradient(180deg,
+            rgba(255,255,255,0.30) 0%,
+            rgba(255,255,255,0.18) 24%,
+            rgba(255,255,255,0.08) 50%,
+            rgba(255,255,255,0.02) 76%,
+            rgba(255,255,255,0) 100%);
     color: #fff;
-    border: 1px solid rgba(255,255,255,0.30);
+    border: 1px solid rgba(255,255,255,0.32);
     border-bottom-right-radius: 6px;
     box-shadow:
-        0 12px 28px -16px rgba(45,120,220,0.65),
-        inset 0 1px 0 rgba(255,255,255,0.42),
+        0 12px 28px -16px rgba(45,120,220,0.62),
+        inset 0 1px 0 rgba(255,255,255,0.40),
         inset 0 0 0 1px rgba(255,255,255,0.10);
 }
 
-/* ---- 水玻璃：薄、透 ---- */
+/* ---- 水玻璃：薄一点，但同样是一条平滑渐变 ---- */
 .bubble.water.assistant {
-    background-color: rgba(255, 255, 255, 0.20);
+    background-color: rgba(255, 255, 255, 0.42);
     background-image:
-        radial-gradient(150% 110% at 10% -10%, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.16) 34%, rgba(255,255,255,0) 66%),
-        linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.04) 100%);
+        linear-gradient(180deg,
+            rgba(255,255,255,0.44) 0%,
+            rgba(255,255,255,0.26) 22%,
+            rgba(255,255,255,0.12) 48%,
+            rgba(255,255,255,0.04) 74%,
+            rgba(255,255,255,0) 100%);
     color: var(--text-primary);
-    border: 1px solid rgba(255,255,255,0.55);
+    border: 1px solid rgba(255,255,255,0.52);
     border-bottom-left-radius: 6px;
     box-shadow:
-        0 16px 38px -20px rgba(15,23,42,0.34),
+        0 16px 38px -20px rgba(15,23,42,0.30),
         inset 0 1px 0 rgba(255,255,255,0.88),
-        inset 0 0 22px rgba(255,255,255,0.16);
+        inset 0 0 20px rgba(255,255,255,0.14);
 }
 
 .bubble.water.user {
-    background-color: rgba(56, 128, 232, 0.50);
+    background-color: rgba(56, 128, 232, 0.66);
     background-image:
-        radial-gradient(150% 110% at 10% -10%, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0) 68%),
-        linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 62%, rgba(255,255,255,0.03) 100%);
+        linear-gradient(180deg,
+            rgba(255,255,255,0.32) 0%,
+            rgba(255,255,255,0.20) 24%,
+            rgba(255,255,255,0.09) 50%,
+            rgba(255,255,255,0.03) 76%,
+            rgba(255,255,255,0) 100%);
     color: #fff;
-    border: 1px solid rgba(255,255,255,0.34);
+    border: 1px solid rgba(255,255,255,0.36);
     border-bottom-right-radius: 6px;
     box-shadow:
-        0 18px 36px -20px rgba(30,90,180,0.62),
-        inset 0 1px 0 rgba(255,255,255,0.46),
-        inset 0 0 20px rgba(255,255,255,0.12);
+        0 18px 36px -20px rgba(30,90,180,0.58),
+        inset 0 1px 0 rgba(255,255,255,0.44),
+        inset 0 0 18px rgba(255,255,255,0.10);
 }
 
 /* ---- 暗色：只换纱的颜色，纹理与高光共用 ---- */
@@ -925,17 +943,17 @@ html, body {
     background-image:
         linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%);
 }
-[data-theme="dark"] .bubble.ios.assistant { background-color: rgba(50,50,56,0.58); border-color: rgba(255,255,255,0.10); box-shadow: 0 12px 30px -18px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.12); }
-[data-theme="dark"] .bubble.water.assistant { background-color: rgba(44,44,50,0.20); border-color: rgba(255,255,255,0.12); box-shadow: 0 16px 38px -20px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.14); }
-[data-theme="dark"] .bubble.ios.user { background-color: rgba(52,110,200,0.52); }
+[data-theme="dark"] .bubble.ios.assistant { background-color: rgba(50,50,56,0.74); border-color: rgba(255,255,255,0.10); box-shadow: 0 12px 30px -18px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.12); }
+[data-theme="dark"] .bubble.water.assistant { background-color: rgba(44,44,50,0.42); border-color: rgba(255,255,255,0.12); box-shadow: 0 16px 38px -20px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.14); }
+[data-theme="dark"] .bubble.ios.user { background-color: rgba(52,110,200,0.80); }
 
 @media (prefers-color-scheme: dark) {
     [data-theme="auto"] #sidebar {
         background-image:
             linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%);
     }
-    [data-theme="auto"] .bubble.ios.assistant { background-color: rgba(50,50,56,0.58); border-color: rgba(255,255,255,0.10); box-shadow: 0 12px 30px -18px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.12); }
-    [data-theme="auto"] .bubble.water.assistant { background-color: rgba(44,44,50,0.20); border-color: rgba(255,255,255,0.12); box-shadow: 0 16px 38px -20px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.14); }
+    [data-theme="auto"] .bubble.ios.assistant { background-color: rgba(50,50,56,0.74); border-color: rgba(255,255,255,0.10); box-shadow: 0 12px 30px -18px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.12); }
+    [data-theme="auto"] .bubble.water.assistant { background-color: rgba(44,44,50,0.42); border-color: rgba(255,255,255,0.12); box-shadow: 0 16px 38px -20px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.14); }
 }
 
 .bubble.none.user,
@@ -1344,7 +1362,7 @@ html, body {
     gap: 8px;
     background-color: var(--glass-tint);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.52) 0%, rgba(255,255,255,0.03) 46%, rgba(255,255,255,0) 100%);
+        linear-gradient(180deg, rgba(255,255,255,0.40) 0%, rgba(255,255,255,0.22) 22%, rgba(255,255,255,0.10) 48%, rgba(255,255,255,0.03) 74%, rgba(255,255,255,0) 100%);
     background-size: 100% 100%;
     background-position: center;
     background-repeat: no-repeat;
