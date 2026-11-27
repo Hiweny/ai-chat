@@ -49,8 +49,10 @@
     let abortController = null;
     let searchQuery = '';
 
-    let userProfile = { avatar: '' };
-    let aiProfile = { avatar: '' };
+    const DEFAULT_AVATAR_USER = 'https://ps.ssl.qhmsg.com/t021d922984a57bfbc6.jpg';
+    const DEFAULT_AVATAR_AI = 'https://ps.ssl.qhmsg.com/t02fdce69cbf85f1dd9.jpg';
+    let userProfile = { avatar: DEFAULT_AVATAR_USER };
+    let aiProfile = { avatar: DEFAULT_AVATAR_AI };
 
     let settings = {
         maxPromptLength: 80000,
@@ -70,7 +72,7 @@
         selfPortrait: '',
         imageGenEnabled: true,
         // 模式：跟随对话，这里只记新对话的默认值
-        defaultMode: 'normal',
+        defaultMode: 'waifu',
         waifuMergeDelay: 1400,
         // 可自定义的提示词（留空则用默认）
         prompts: {},
@@ -598,6 +600,29 @@
     }
 
     // ========== 统一调用层 ==========
+    // 免费接口偶发连接中断（读到一半断流）。没输出过内容就自动重试，
+    // 已经输出过的重试会出现重复文字，所以直接抛给上层显示错误。
+    async function callChatRetry(opts) {
+        let lastErr = null;
+        for (let i = 0; i < 3; i++) {
+            let produced = false;
+            const wrapped = { ...opts, onDelta: (d) => { if (d && d.length) produced = true; opts.onDelta(d); } };
+            try {
+                await callChat(wrapped);
+                return;
+            } catch (e) {
+                lastErr = e;
+                if (e && e.name === 'AbortError') throw e;
+                if (produced) throw e;
+                if (i < 2) {
+                    if (typeof showToast === 'function') showToast('连接中断，正在重试（' + (i + 1) + '/2）', 'error', 1200);
+                    await new Promise(r => setTimeout(r, 700 + i * 800));
+                }
+            }
+        }
+        throw lastErr;
+    }
+
     async function callChat(opts) {
         const { promptText, messages, onDelta, signal } = opts;
         const p = currentProvider();
@@ -1047,7 +1072,7 @@
 
         try {
             let fullText = '';
-            await callChat({
+            await callChatRetry({
                 promptText: prompt,
                 messages: buildMessages(userMsg),
                 signal: abortController.signal,
@@ -1190,7 +1215,7 @@
 
         try {
             let fullText = '';
-            await callChat({
+            await callChatRetry({
                 promptText: prompt,
                 messages: buildMessages(userMsg),
                 signal: abortController.signal,
@@ -1436,7 +1461,7 @@
 
         let fullText = '';
         try {
-            await callChat({
+            await callChatRetry({
                 promptText: fitPrompt(buildPrompt(last.content)),
                 messages: buildMessages(last.content),
                 signal: abortController.signal,
@@ -2345,8 +2370,70 @@ ${chunkText}
         updateContextUsage();
     }
 
+    // ========== 设置面板分区 ==========
+    const SETTINGS_TABS = [
+        { id: 'service', label: '服务', sections: ['聊天服务', '生图服务'] },
+        { id: 'persona', label: '人格', sections: ['系统提示词', '提示词工程'] },
+        { id: 'chat', label: '对话', sections: ['对话行为'] },
+        { id: 'look', label: '外观', sections: ['外观', '头像', '背景'] },
+        { id: 'data', label: '数据', sections: ['图片管理', '数据'] },
+    ];
+
+    function selectSettingsTab(id) {
+        document.querySelectorAll('.settings-tab').forEach(b => {
+            b.classList.toggle('active', b.dataset.tab === id);
+        });
+        document.querySelectorAll('.settings-pane').forEach(p => {
+            p.classList.toggle('active', p.dataset.tab === id);
+        });
+        const body = document.querySelector('.settings-body');
+        if (body) body.scrollTop = 0;
+    }
+
+    function buildSettingsTabs() {
+        const body = document.querySelector('.settings-body');
+        if (!body || body.dataset.grouped === '1') return;
+        const panes = {};
+        const bar = document.createElement('div');
+        bar.className = 'settings-tabs';
+        SETTINGS_TABS.forEach((t, i) => {
+            const btn = document.createElement('button');
+            btn.className = 'settings-tab' + (i === 0 ? ' active' : '');
+            btn.dataset.tab = t.id;
+            btn.type = 'button';
+            btn.textContent = t.label;
+            btn.addEventListener('click', () => selectSettingsTab(t.id));
+            bar.appendChild(btn);
+
+            const pane = document.createElement('div');
+            pane.className = 'settings-pane' + (i === 0 ? ' active' : '');
+            pane.dataset.tab = t.id;
+            body.appendChild(pane);
+            panes[t.id] = pane;
+        });
+        [...body.querySelectorAll('.settings-section')].forEach(sec => {
+            const title = (sec.querySelector('.section-title') || {}).textContent || '';
+            const hit = SETTINGS_TABS.find(t => t.sections.some(s => title.includes(s)));
+            (panes[hit ? hit.id : 'service']).appendChild(sec);
+        });
+        body.insertBefore(bar, body.firstChild);
+        body.dataset.grouped = '1';
+    }
+
+    function updateSelfPortraitHint() {
+        const ta = $('#set-selfportrait');
+        const hint = $('#selfportrait-hint');
+        if (!ta || !hint) return;
+        const n = (ta.value || '').trim().length;
+        if (!n) { hint.textContent = '留空则按人设自动推断外貌。'; return; }
+        if (n <= 600) hint.textContent = n + ' 字符 · 长度合适';
+        else if (n <= 1500) hint.textContent = n + ' 字符 · 偏长，会稍微拖慢首字响应';
+        else hint.textContent = n + ' 字符 · 过长：每轮都会随请求发送，免费接口可能因此断流（已自动重试）。建议压到 600 字符以内。';
+    }
+
     function openSettings() {
         ensureProviders();
+        buildSettingsTabs();
         settingsOverlay.classList.add('active');
         settingsPanel.classList.add('active');
 
@@ -2360,10 +2447,12 @@ ${chunkText}
         $('#set-brightness').value = settings.backgroundBrightness;
         refreshCtxInputs();
         $('#set-rounds').value = settings.recentRounds;
+        updateSelfPortraitHint();
         $('#set-autocompact').checked = !!settings.autoCompact;
         $('#set-waifu').checked = isWaifuMode();
         $('#set-imagegen').checked = !!settings.imageGenEnabled;
         $('#set-selfportrait').value = settings.selfPortrait || '';
+        $('#set-selfportrait').addEventListener('input', updateSelfPortraitHint);
         $('#set-systemprompt').value = settings.systemPrompt || '';
         $('#prompt-time').value = getPrompt('time');
         $('#prompt-waifu').value = getPrompt('waifu');
@@ -2481,19 +2570,10 @@ ${chunkText}
 
     // ========== 模式切换 ==========
     function applyMode() {
-        // 顶栏胶囊、输入框、侧栏跟着气泡样式走：直接写 CSS 变量，避免选择器优先级问题
-        const preset = ['ios', 'water'].includes(settings.bubbleStyle) ? settings.bubbleStyle : 'plain';
-        const rootEl = document.documentElement;
-        rootEl.setAttribute('data-glass', preset);
-        const dark = isDarkNow();
-        const tints = dark
-            ? { ios: 'rgba(48,48,54,0.56)', water: 'rgba(44,44,50,0.26)', plain: 'var(--bg-input)' }
-            : { ios: 'rgba(255,255,255,0.44)', water: 'rgba(255,255,255,0.16)', plain: 'var(--bg-input)' };
-        const edges = dark
-            ? { ios: 'rgba(255,255,255,0.12)', water: 'rgba(255,255,255,0.16)', plain: 'var(--border-color)' }
-            : { ios: 'rgba(255,255,255,0.68)', water: 'rgba(255,255,255,0.44)', plain: 'var(--border-color)' };
-        rootEl.style.setProperty('--glass-tint', tints[preset]);
-        rootEl.style.setProperty('--glass-edge-c', edges[preset]);
+        // 整站主题：一套 data-style 控制气泡/胶囊/输入框/侧栏/设置面板
+        const STYLES = ['modern', 'wechat', 'telegram', 'imessage', 'ios', 'water', 'none'];
+        const preset = STYLES.includes(settings.bubbleStyle) ? settings.bubbleStyle : 'modern';
+        document.documentElement.setAttribute('data-style', preset);
         const wf = isWaifuMode();
         const label = $('#mode-label');
         if (label) label.textContent = wf ? 'WA' : 'AI';
@@ -3102,11 +3182,21 @@ ${chunkText}
             settings._defaultsV3 = true;
         }
 
+        // v5：默认头像 + 默认 waifu 模式
+        if (!settings._defaultsV5) {
+            if (!userProfile.avatar) userProfile.avatar = DEFAULT_AVATAR_USER;
+            if (!aiProfile.avatar) aiProfile.avatar = DEFAULT_AVATAR_AI;
+            settings.defaultMode = 'waifu';
+            Object.values(conversations).forEach(c => { if (c && c.mode !== 'waifu') c.mode = 'waifu'; });
+            settings._defaultsV5 = true;
+            saveAll();
+        }
+
         // v4：换默认壁纸（这张图作为新的出厂背景）
         if (!settings._defaultsV4) {
             settings.backgroundImage = 'https://ps.ssl.qhmsg.com/t02314044a3d0a68d59.jpg';
             settings._defaultsV4 = true;
-            if (typeof saveSettings === 'function') saveSettings();
+            saveAll();
         }
         ensureProviders();
 
