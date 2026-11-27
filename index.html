@@ -222,9 +222,10 @@
                 <div class="section-title">生图服务</div>
                 <div class="setting-item">
                     <label class="checkbox-label">
-                        <input type="checkbox" id="set-imagegen" checked>
+                        <input type="checkbox" id="set-imagegen">
                         <span>启用生图（关闭后不向模型发送生图规则）</span>
                     </label>
+                    <div class="hint-text" id="imagegen-hint" style="margin-top:4px;"></div>
                 </div>
                 <div class="setting-item">
                     <label>当前使用</label>
@@ -368,7 +369,7 @@
                 <div class="section-title">背景</div>
                 <div class="setting-item">
                     <label>背景图片 URL</label>
-                    <input type="text" id="set-bgurl" placeholder="图片URL">
+                    <input type="text" id="set-bgurl" placeholder="图片 URL（留空则用纯色背景）">
                     <input type="file" id="set-bgimage" accept="image/*" class="file-input">
                     <button id="clear-bg" class="btn-small">清除背景</button>
                 </div>
