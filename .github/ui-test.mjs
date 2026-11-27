@@ -167,7 +167,9 @@ await page.waitForTimeout(300);
 await gotoTab('外观');
 await page.check('#set-timestamp');
 await page.click('#close-settings');
-await page.waitForTimeout(600);
+await page.waitForTimeout(400);
+await page.waitForSelector('.msg-row.assistant .msg-meta', { timeout: 6000 }).catch(() => { });
+await page.waitForTimeout(200);
 const meta = await page.evaluate(() => {
     const row = document.querySelector('.msg-row.assistant');
     if (!row) return null;
