@@ -534,6 +534,98 @@ await page.waitForTimeout(200);
 await page.click('#close-settings');
 await page.waitForTimeout(400);
 
+// ---------- 6.6 识图端到端（mock 识图 + 聊天接口，验证真实链路） ----------
+let visionReq = null, chatReq = '';
+await page.route('**/openrouter.ai/**', async route => {
+    try { visionReq = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
+    await new Promise(r => setTimeout(r, 900));   // 故意慢一点，验证"先上屏再识图"
+    route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ choices: [{ message: { content: '画面中央是一个红色圆形，背景是浅蓝色，左上角写着 HELLO 2026。' } }] }),
+    });
+});
+await page.route('**/free-api.cnmwx.com/**', async route => {
+    chatReq = route.request().postData() || '';
+    route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: '我看到图里有个红色圆形啦。' });
+});
+
+// 填识图 Key 并启用
+await page.click('#settings-top-btn');
+await page.waitForTimeout(400);
+await page.click('#visionprovider-list .btn-small');
+await page.waitForTimeout(300);
+await page.fill('#ve-key', 'sk-or-v1-ci-dummy-key');
+await page.click('#ve-save');
+await page.waitForTimeout(500);
+const visionUnlocked = await page.evaluate(() => {
+    const v = document.getElementById('set-vision');
+    return { disabled: v.disabled, hint: (document.getElementById('vision-hint') || {}).textContent || '' };
+});
+ok('填 Key 后识图开关可用', visionUnlocked.disabled === false, JSON.stringify(visionUnlocked));
+await page.evaluate(() => {
+    const v = document.getElementById('set-vision');
+    v.checked = true;
+    v.dispatchEvent(new Event('change', { bubbles: true }));
+});
+await page.waitForTimeout(200);
+await page.click('#close-settings');
+await page.waitForTimeout(400);
+
+// 选一张图
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAJUlEQVR42mNkYPhfz0AEYBxVSF+FjIOuMEYXsjCqkL4KAQAA//8DAAoAAf8E3ZcAAAAASUVORK5CYII=', 'base64');
+const fcP = page.waitForEvent('filechooser');
+await page.click('#attach-btn');
+const fc = await fcP;
+await fc.setFiles({ name: 'pic.png', mimeType: 'image/png', buffer: PNG });
+await page.waitForTimeout(800);
+ok('选图后出现缩略图预览', await page.evaluate(() => document.querySelectorAll('#attach-preview .attach-item').length > 0));
+await page.screenshot({ path: path.join(OUT, '16-attach-preview.jpg'), type: 'jpeg', quality: 72, clip: { x: 0, y: 560, width: 390, height: 284 } });
+
+// 发送：先上屏，再识图
+await page.fill('#chat-input', '这张图是什么');
+await page.click('#send-btn');
+await page.waitForTimeout(300);
+const midState = await page.evaluate(() => {
+    const hint = document.getElementById('busy-hint');
+    return {
+        userRows: document.querySelectorAll('.msg-row.user').length,
+        hintShown: hint && !hint.hidden,
+        hintText: (document.getElementById('busy-hint-text') || {}).textContent || '',
+    };
+});
+ok('识图未完成时消息已先上屏', midState.userRows > 0, String(midState.userRows));
+ok('输入框上方显示"正在识图"', midState.hintShown && /识图/.test(midState.hintText), JSON.stringify(midState));
+await page.screenshot({ path: path.join(OUT, '17-vision-busy.jpg'), type: 'jpeg', quality: 72 });
+
+await page.waitForTimeout(3200);
+ok('识图请求带上了图片数据', !!(visionReq && visionReq.messages && Array.isArray(visionReq.messages[0].content)
+    && visionReq.messages[0].content.some(c => c.type === 'image_url' && /^data:image\//.test(c.image_url && c.image_url.url))));
+ok('识图请求 max_tokens 足够（推理模型）', !!(visionReq && visionReq.max_tokens >= 1200), String(visionReq && visionReq.max_tokens));
+ok('识图请求带了提示词', !!(visionReq && visionReq.messages[0].content.some(c => c.type === 'text' && c.text && c.text.length > 10)));
+ok('聊天请求里带上了【图片内容】描述', /【图片内容】/.test(chatReq) && /红色圆形/.test(chatReq), chatReq.slice(0, 160));
+ok('识图结束后状态条收起', await page.evaluate(() => document.getElementById('busy-hint').hidden));
+
+// ---------- 6.7 上下文进度条 ----------
+await page.click('#settings-top-btn');
+await page.waitForTimeout(500);
+await gotoTab('对话');
+const meter = await page.evaluate(() => {
+    const f = document.getElementById('ctx-meter-fill');
+    const box = document.getElementById('ctx-meter');
+    return {
+        width: f ? f.style.width : '',
+        pct: (document.getElementById('ctx-meter-pct') || {}).textContent || '',
+        foot: (document.getElementById('ctx-meter-text') || {}).textContent || '',
+        visible: !!(f && f.getBoundingClientRect().width > 0),
+    };
+});
+ok('对话分区有上下文进度条', meter.visible, JSON.stringify(meter));
+ok('进度条有百分比数字', /\d+%/.test(meter.pct), meter.pct);
+ok('进度条有字符数说明', /字符/.test(meter.foot), meter.foot);
+await page.screenshot({ path: path.join(OUT, '18-ctx-meter.jpg'), type: 'jpeg', quality: 72 });
+await page.click('#close-settings');
+await page.waitForTimeout(300);
+
 // ---------- 7. 报错汇总 ----------
 const realErrors = errors.filter(e => !/favicon|net::ERR|Failed to load resource/i.test(e));
 ok('无 JS 运行时错误', realErrors.length === 0, realErrors.slice(0, 3).join(' | '));
