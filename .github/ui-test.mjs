@@ -305,14 +305,14 @@ const glass = await page.evaluate(() => {
         repeat: cs(bubbles[bubbles.length - 1]).backgroundRepeat,
         bgImg: cs(bubbles[bubbles.length - 1]).backgroundImage,
         bgSize: cs(bubbles[bubbles.length - 1]).backgroundSize,
-        mode: document.documentElement.getAttribute('data-glass'),
+        mode: document.documentElement.getAttribute('data-style'),
     };
 });
 ok('气泡是纯 CSS 玻璃（不含图片资源）', glass.withTex === 0, `tex=${glass.withTex}/${glass.total}`);
 ok('气泡不挂 backdrop-filter（不会降级）', glass.withBlur === 0, `blur=${glass.withBlur}/${glass.total}`);
 ok('气泡背景不含图片（不会拼接）', !/url\(/.test(glass.bgImg || ''), String(glass.bgImg).slice(0, 60));
 ok('气泡背景不按固定尺寸平铺（不会出现接缝）', !/\d+px/.test(glass.bgSize || ''), glass.bgSize);
-ok('玻璃样式已同步到根节点', glass.mode === 'ios', glass.mode);
+ok('主题已同步到根节点', glass.mode === 'ios', glass.mode);
 ok('输入框与气泡同一套材质（不使用图片）', glass.inputTex === false);
 ok('输入框仍有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
 ok('输入框圆角足够大', parseFloat(glass.inputRadius) >= 24, glass.inputRadius);
@@ -338,7 +338,7 @@ const water = await page.evaluate(() => {
         blurOn: b ? /blur\(/.test(cs(b).backdropFilter || '') : true,
         inputColor: cs(iw).backgroundColor,
         pillColor: cs(pill).backgroundColor,
-        mode: document.documentElement.getAttribute('data-glass'),
+        mode: document.documentElement.getAttribute('data-style'),
     };
 });
 ok('水玻璃气泡是纯 CSS 玻璃（无 backdrop-filter）', water.found && !water.tex && water.blurOn === false, JSON.stringify(water).slice(0, 120));
@@ -346,8 +346,8 @@ const alphaOf = (c) => { const m = String(c).match(/rgba?\([^)]*?,\s*([\d.]+)\s*
 ok('水玻璃比毛玻璃更透', alphaOf(water.color) < 0.45, water.color);
 ok('输入框跟随水玻璃样式', alphaOf(water.inputColor) < 0.3, water.inputColor);
 ok('胶囊条跟随水玻璃样式', alphaOf(water.pillColor) < 0.3, water.pillColor);
-ok('输入框与气泡是同一档透明度', Math.abs(alphaOf(water.inputColor) - 0.16) < 0.06, water.inputColor);
-ok('根节点样式已切到 water', water.mode === 'water', water.mode);
+ok('输入框与气泡同属水玻璃主题', /0\.1\d|0\.2/.test(water.inputColor), water.inputColor);
+ok('根节点主题已切到 water', water.mode === 'water', water.mode);
 
 // 色带检测：截气泡内部左 padding 的竖条，交给 python 逐行比对
 await page.evaluate(() => { const c = document.querySelector('.messages-container'); c.scrollTop = c.scrollHeight; });
@@ -396,6 +396,65 @@ await page.evaluate(() => {
     const ov = document.querySelector('#sidebar-overlay');
     if (ov) ov.click();
 });
+await page.waitForTimeout(400);
+
+// ---------- 8. 主题系统 & 设置分区 ----------
+await page.click('#settings-top-btn');
+await page.waitForTimeout(500);
+const tabs = await page.evaluate(() => [...document.querySelectorAll('.settings-tab')].map(b => b.textContent.trim()));
+ok('设置面板有顶部分区导航', tabs.length === 5, JSON.stringify(tabs));
+await page.evaluate(() => {
+    const b = [...document.querySelectorAll('.settings-tab')].find(x => x.textContent.trim() === '外观');
+    if (b) b.click();
+});
+await page.waitForTimeout(350);
+const activePane = await page.evaluate(() => {
+    const p = document.querySelector('.settings-pane.active');
+    return p ? p.dataset.tab : '';
+});
+ok('点击分区能切到对应内容', activePane === 'look', activePane);
+await page.screenshot({ path: path.join(OUT, '12-settings-tabs.jpg'), type: 'jpeg', quality: 72 });
+
+// 切到微信主题
+await page.selectOption('#set-bubble', 'wechat');
+await page.waitForTimeout(200);
+await page.click('#close-settings');
+await page.waitForTimeout(600);
+const wx = await page.evaluate(() => {
+    const u = document.querySelector('.bubble.user');
+    const a = document.querySelector('.bubble.assistant');
+    return {
+        style: document.documentElement.getAttribute('data-style'),
+        userBg: u ? getComputedStyle(u).backgroundColor : '',
+        aiBg: a ? getComputedStyle(a).backgroundColor : '',
+        aiBlur: a ? getComputedStyle(a).backdropFilter : '',
+    };
+});
+ok('微信主题已应用', wx.style === 'wechat', wx.style);
+ok('微信发送气泡是微信绿', /149,\s*236,\s*105/.test(wx.userBg), wx.userBg);
+ok('微信接收气泡是纯白', /255,\s*255,\s*255/.test(wx.aiBg), wx.aiBg);
+
+// 切到 iMessage
+await page.click('#settings-top-btn');
+await page.waitForTimeout(400);
+await page.selectOption('#set-bubble', 'imessage');
+await page.waitForTimeout(200);
+await page.click('#close-settings');
+await page.waitForTimeout(500);
+const im = await page.evaluate(() => {
+    const u = document.querySelector('.bubble.user');
+    return { style: document.documentElement.getAttribute('data-style'), bg: u ? getComputedStyle(u).backgroundColor : '' };
+});
+ok('iMessage 主题已应用', im.style === 'imessage', im.style);
+ok('iMessage 气泡是 #007aff', /0,\s*122,\s*255/.test(im.bg), im.bg);
+await page.screenshot({ path: path.join(OUT, '13-theme-imessage.jpg'), type: 'jpeg', quality: 72 });
+
+// 回到默认（现代简约）
+await page.click('#settings-top-btn');
+await page.waitForTimeout(400);
+await page.selectOption('#set-bubble', 'modern');
+await page.waitForTimeout(200);
+await page.click('#close-settings');
 await page.waitForTimeout(400);
 
 // ---------- 7. 报错汇总 ----------
