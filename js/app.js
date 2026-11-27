@@ -1137,6 +1137,8 @@ Example structure:
         }
         if (!resp.ok) {
             const t = await resp.text().catch(() => '');
+            if (resp.status === 429) throw new Error('识图接口被限流了（免费模型有频率限制），等一会儿再试');
+            if (resp.status === 401 || resp.status === 403) throw new Error('识图 Key 无效或没有该模型权限');
             throw new Error('识图接口 HTTP ' + resp.status + ' ' + t.slice(0, 120));
         }
         const data = await resp.json();
