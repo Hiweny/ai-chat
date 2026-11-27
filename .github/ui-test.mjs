@@ -535,18 +535,22 @@ await page.click('#close-settings');
 await page.waitForTimeout(400);
 
 // ---------- 6.6 识图端到端（mock 识图 + 聊天接口，验证真实链路） ----------
+// 跨域 mock：浏览器会先发 OPTIONS 预检，必须带上 CORS 头，否则真实 POST 根本不会发出
+const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
 let visionReq = null, chatReq = '';
 await page.route('**/openrouter.ai/**', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     try { visionReq = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
     await new Promise(r => setTimeout(r, 900));   // 故意慢一点，验证"先上屏再识图"
     route.fulfill({
-        status: 200, contentType: 'application/json',
+        status: 200, headers: { ...CORS, 'content-type': 'application/json' },
         body: JSON.stringify({ choices: [{ message: { content: '画面中央是一个红色圆形，背景是浅蓝色，左上角写着 HELLO 2026。' } }] }),
     });
 });
 await page.route('**/free-api.cnmwx.com/**', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     chatReq = route.request().postData() || '';
-    route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: '我看到图里有个红色圆形啦。' });
+    route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'text/plain; charset=utf-8' }, body: '我看到图里有个红色圆形啦。' });
 });
 
 // 填识图 Key 并启用
@@ -609,6 +613,7 @@ ok('识图结束后状态条收起', await page.evaluate(() => document.getEleme
 // ---------- 6.8 OpenAI 兼容接口：走原生 function calling ----------
 const nativeReqs = [];
 await page.route('**/api.test.local/**', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     let body = {};
     try { body = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
     nativeReqs.push(body);
@@ -619,19 +624,20 @@ await page.route('**/api.test.local/**', async route => {
             'data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"query":"北京天气"}' } }] } }] }) + '\n\n',
             'data: [DONE]\n\n',
         ].join('');
-        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
+        await route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'text/event-stream' }, body: sse });
         return;
     }
     await route.fulfill({
-        status: 200, contentType: 'text/event-stream',
+        status: 200, headers: { ...CORS, 'content-type': 'text/event-stream' },
         body: 'data: ' + JSON.stringify({ choices: [{ delta: { content: '北京今天晴，18 度。' } }] }) + '\n\ndata: [DONE]\n\n',
     });
 });
 let tavilyHits = 0;
 await page.route('**/api.tavily.com/**', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     tavilyHits++;
     await route.fulfill({
-        status: 200, contentType: 'application/json',
+        status: 200, headers: { ...CORS, 'content-type': 'application/json' },
         body: JSON.stringify({ query: '北京天气', answer: '晴，18度', results: [{ title: '北京天气预报', content: '今天晴，最高 18 度', url: 'https://weather.example/bj' }] }),
     });
 });
@@ -662,9 +668,20 @@ await page.waitForTimeout(200);
 await page.click('#close-settings');
 await page.waitForTimeout(400);
 
+// 确保普通模式（waifu 模式会延迟合并，影响断言）
+await page.click('#settings-top-btn');
+await page.waitForTimeout(400);
+await gotoTab('对话');
+await page.evaluate(() => {
+    const el = document.getElementById('set-waifu');
+    if (el && el.checked) { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); }
+});
+await page.click('#close-settings');
+await page.waitForTimeout(400);
+
 await page.fill('#chat-input', '北京今天天气怎么样');
 await page.click('#send-btn');
-await page.waitForTimeout(3000);
+await page.waitForTimeout(6000);
 
 ok('第一轮请求带原生 tools 声明', nativeReqs.length > 0 && Array.isArray(nativeReqs[0].tools)
     && nativeReqs[0].tools[0] && nativeReqs[0].tools[0].function.name === 'web_search',
