@@ -38,6 +38,9 @@ jobs:
       - name: Install Pillow
         run: python3 -m pip install --quiet pillow
 
+      - name: Banding check
+        run: python3 .github/banding-check.py ui-out/bubble-strip.png
+
       - name: Flicker capture (A/B 三种实现)
         continue-on-error: true
         run: node .github/flicker-capture.mjs
