@@ -64,6 +64,4 @@ jobs:
           path: |
             ui-out/**
             ui-out-live/**
-            flicker-out/**
-            flicker-out-live/**
           retention-days: 7
