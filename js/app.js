@@ -508,7 +508,8 @@
 <genimg prompt="英文画面描述" />
 
 什么时候用：
-- 对方明确想看照片、要自拍、要你画点什么、要你描述某个画面；
+- 对方明确想看照片、要自拍、要你画点什么；
+- 对方发来图片（你会收到【图片内容】说明）时，那是在让你看这张图，除非他明确说"照着画一张"，否则不要生图；
 - 聊天情境里"发张图"很自然（提到某个地方、某样东西、某种心情、某个梗）。
 
 什么时候别用：
@@ -604,7 +605,8 @@
     // 系统设定 → 现在 → 历史摘要 → waifu 协议 → 生图协议 → 打断说明
     // 头部：只放「稳定指令」，按固定顺序排列，块与块之间空一行
     // 1 人设 → 2 时间 → 3 历史摘要 → 4 回复规则（聊天方式 / 生图 / 搜索 / 打断）
-    function headBlocks() {
+    function headBlocks(opts) {
+        const o = opts || {};
         const parts = [];
         const sys = activeSystemPrompt();
         if (sys) parts.push(`【系统设定】\n${sys}\n【系统设定结束】`);
@@ -613,8 +615,11 @@
         if (summary.trim()) parts.push(`【历史摘要】\n${summary.trim()}\n【历史摘要结束】`);
 
         if (isWaifuMode()) parts.push(getPrompt('waifu'));
-        const ip = imageProtocol();
-        if (ip) parts.push(ip);
+        // 对方刚发来图片的这一轮不给生图能力：他是在让你看图，不是让你画图
+        if (!o.noImage) {
+            const ip = imageProtocol();
+            if (ip) parts.push(ip);
+        }
         if (settings.searchEnabled && currentProvider().type !== 'openai') parts.push(getPrompt('search'));
         const ib = interruptBlock();
         if (ib) parts.push(ib);
@@ -636,8 +641,8 @@
         return msgs;
     }
 
-    function buildPrompt(userMsg, extra) {
-        const parts = [headBlocks()];
+    function buildPrompt(userMsg, extra, opts) {
+        const parts = [headBlocks(opts)];
         const hist = historyMsgs(userMsg);
         if (hist.length) {
             parts.push('【对话历史】下面每一行：User 是对方说的话，Assistant 是你自己之前说的话。\n'
@@ -653,8 +658,8 @@
     }
 
     // OpenAI 兼容接口用 messages 结构
-    function buildMessages(userMsg, extra) {
-        const arr = [{ role: 'system', content: headBlocks() }];
+    function buildMessages(userMsg, extra, opts) {
+        const arr = [{ role: 'system', content: headBlocks(opts) }];
         for (const m of historyMsgs(userMsg)) {
             arr.push({ role: m.role === 'user' ? 'user' : 'assistant', content: msgText(m) });
         }
@@ -1092,7 +1097,7 @@
                     ],
                 }],
                 // 多模态推理模型会先用大量 token 思考，给少了正文会被截断成空
-                max_tokens: 1600,
+                max_tokens: 2000,
             }),
         });
         if (!resp.ok) {
@@ -1406,8 +1411,12 @@
 
     async function sendForRegenerate(userMsg) {
         if (isGenerating) return;
+        const tailMsg = getMessages().slice(-1)[0];
+        const regenOpts = (tailMsg && tailMsg.role === 'user' && Array.isArray(tailMsg.images) && tailMsg.images.length)
+            ? { noImage: true } : undefined;
+        const noImage = !!(regenOpts && regenOpts.noImage);
 
-        const prompt = fitPrompt(buildPrompt(userMsg));
+        const prompt = fitPrompt(buildPrompt(userMsg, undefined, regenOpts));
 
         // 创建AI气泡 - 修复：aiRow 已有 position:relative
         const aiRow = document.createElement('div');
@@ -1433,7 +1442,7 @@
         try {
             let fullText = '';
             const useNativeTools = settings.searchEnabled && currentProvider().type === 'openai';
-            let chatMessages = buildMessages(userMsg);
+            let chatMessages = buildMessages(userMsg, undefined, regenOpts);
 
             const turn = await callChatRetry({
                 promptText: prompt,
@@ -1536,7 +1545,7 @@
             } else {
                 aiRow.remove();
             }
-            if (imgPrompt && settings.imageGenEnabled && hasImageKey()) handleGenImage(imgPrompt);
+            if (imgPrompt && !noImage && settings.imageGenEnabled && hasImageKey()) handleGenImage(imgPrompt);
 
         } catch (err) {
             clearTimeout(timeoutId);
@@ -1642,9 +1651,11 @@
                     if (shots.length > 1) setBusyHint(`正在识图（${i + 1}/${shots.length}）…`);
                     descs.push(await describeImage(shots[i].dataUrl));
                 }
-                const block = descs.length === 1
+                let block = descs.length === 1
                     ? '【图片内容】\n' + descs[0]
-                    : '【图片内容】\n' + descs.map((d, i) => '(' + (i + 1) + ') ' + d).join('\n');
+                    : `【图片内容】对方一共发了 ${descs.length} 张图片，按上传顺序：\n`
+                        + descs.map((d, i) => `第 ${i + 1} 张：${d}`).join('\n\n');
+                if (!typed) block += '\n\n（对方只发了图片、没写字，请直接针对画面内容回应。）';
                 userMsgObj.ctx = (typed ? typed + '\n\n' : '') + block;
                 sendText = userMsgObj.ctx;
                 saveAll();
@@ -1672,20 +1683,21 @@
             return;
         }
 
-        await runNormalTurn(sendText);
+        await runNormalTurn(sendText, { noImage: shots.length > 0 });
     }
 
     // ---------- 普通模式：一问一答，流式 ----------
-    async function runNormalTurn(userMsg) {
+    async function runNormalTurn(userMsg, opts) {
         if (isGenerating) return;
+        const noImage = !!(opts && opts.noImage);
 
-        let prompt = buildPrompt(userMsg);
+        let prompt = buildPrompt(userMsg, undefined, opts);
         const cap = providerMaxChars();
         const warnAt = providerWarnChars();
         if (settings.autoCompact && prompt.length > Math.min(warnAt, cap)) {
             renderSystemMessage(`\u26a0\ufe0f 上下文已达 ${prompt.length} 字符，正在自动压缩旧消息...`);
             const ok = await compactConversation({ manual: false, silent: false });
-            if (ok) prompt = buildPrompt(userMsg);
+            if (ok) prompt = buildPrompt(userMsg, undefined, opts);
         } else if (prompt.length > warnAt) {
             renderSystemMessage(`\u2139\ufe0f 上下文较长（${prompt.length} 字符），可点顶栏压缩按钮整理记忆`);
         }
@@ -1715,7 +1727,7 @@
         try {
             let fullText = '';
             const useNativeTools = settings.searchEnabled && currentProvider().type === 'openai';
-            let chatMessages = buildMessages(userMsg);
+            let chatMessages = buildMessages(userMsg, undefined, opts);
 
             const turn = await callChatRetry({
                 promptText: prompt,
@@ -1818,7 +1830,7 @@
             } else {
                 aiRow.remove();
             }
-            if (imgPrompt && settings.imageGenEnabled && hasImageKey()) handleGenImage(imgPrompt);
+            if (imgPrompt && !noImage && settings.imageGenEnabled && hasImageKey()) handleGenImage(imgPrompt);
 
         } catch (err) {
             clearTimeout(timeoutId);
@@ -1958,7 +1970,7 @@
         return parts.length ? parts : [t];
     }
 
-    async function playWaifuBubbles(fullText) {
+    async function playWaifuBubbles(fullText, allowImage) {
         const parts = splitWaifuMessages(filterAd(fullText));
         waifu.playing = true;
         let emitted = 0;
@@ -2000,7 +2012,7 @@
 
             // 生图要等它真的出来再继续下一条，否则图片会插到后面消息的下面
             if (prompt) {
-                await handleGenImage(prompt);
+                if (allowImage !== false) await handleGenImage(prompt);
                 if (waifu.interrupted) {
                     waifu.remainder = parts.slice(i + 1).join(' ');
                     break;
@@ -2047,8 +2059,10 @@
 
         let fullText = '';
         try {
-            const wPrompt = fitPrompt(buildPrompt(last.content));
-            const wMessages = buildMessages(last.content);
+            const wNoImage = Array.isArray(last.images) && last.images.length > 0;
+            const wOpts = wNoImage ? { noImage: true } : undefined;
+            const wPrompt = fitPrompt(buildPrompt(last.content, undefined, wOpts));
+            const wMessages = buildMessages(last.content, undefined, wOpts);
             const wNative = settings.searchEnabled && currentProvider().type === 'openai';
             const wTurn = await callChatRetry({
                 promptText: wPrompt,
@@ -2125,7 +2139,7 @@
             if (!fullText.trim()) {
                 renderSystemMessage('\u26a0\ufe0f 这次没有生成内容，可以再发一句试试');
             } else {
-                await playWaifuBubbles(fullText);
+                await playWaifuBubbles(fullText, !wNoImage);
             }
         } catch (e) {
             typing.row.remove();
