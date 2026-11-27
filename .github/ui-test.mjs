@@ -440,6 +440,38 @@ await page.evaluate(() => {
 });
 await page.waitForTimeout(400);
 
+// ---------- 7.5 识图 / 联网搜索 ----------
+await page.click('#settings-top-btn');
+await page.waitForTimeout(500);
+const newFeat = await page.evaluate(() => {
+    const titles = [...document.querySelectorAll('.settings-section .section-title')].map(e => e.textContent.trim());
+    const v = document.querySelector('#set-vision');
+    const se = document.querySelector('#set-search');
+    return {
+        hasVisionSection: titles.includes('识图服务'),
+        hasSearchSection: titles.includes('联网搜索'),
+        visionChecked: v ? v.checked : null,
+        visionDisabled: v ? v.disabled : null,
+        searchChecked: se ? se.checked : null,
+        hasVisionPrompt: !!document.querySelector('#prompt-vision'),
+        hasAttachBtn: !!document.querySelector('#attach-btn'),
+    };
+});
+ok('设置里有识图服务', newFeat.hasVisionSection);
+ok('设置里有联网搜索', newFeat.hasSearchSection);
+ok('识图默认关闭', newFeat.visionChecked === false, String(newFeat.visionChecked));
+ok('未填 Key 时识图开关禁用', newFeat.visionDisabled === true, String(newFeat.visionDisabled));
+ok('联网搜索默认关闭', newFeat.searchChecked === false, String(newFeat.searchChecked));
+ok('提示词工程里有识图提示词', newFeat.hasVisionPrompt);
+ok('输入框有上传图片按钮', newFeat.hasAttachBtn);
+await gotoTab('人格');
+await page.evaluate(() => { const t = document.querySelector('#prompt-vision'); if (t) t.scrollIntoView({ block: 'center' }); });
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(OUT, '14-vision-prompt.jpg'), type: 'jpeg', quality: 72 });
+await page.click('#close-settings');
+await page.waitForTimeout(300);
+await page.screenshot({ path: path.join(OUT, '15-input-attach.jpg'), type: 'jpeg', quality: 72, clip: { x: 0, y: 640, width: 390, height: 204 } });
+
 // ---------- 8. 主题系统 & 设置分区 ----------
 await page.click('#settings-top-btn');
 await page.waitForTimeout(500);
