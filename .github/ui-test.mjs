@@ -171,17 +171,21 @@ await page.waitForTimeout(400);
 await page.waitForSelector('.msg-row.assistant .msg-meta', { timeout: 6000 }).catch(() => { });
 await page.waitForTimeout(200);
 const meta = await page.evaluate(() => {
-    const row = document.querySelector('.msg-row.assistant');
-    if (!row) return null;
-    const bubble = row.querySelector('.bubble');
-    const m = row.querySelector('.msg-meta');
-    if (!m) return null;
+    const m = document.querySelector('.msg-meta');
+    const diag = {
+        metaCount: document.querySelectorAll('.msg-meta').length,
+        rowCount: document.querySelectorAll('.msg-row').length,
+    };
+    if (!m) return { diag };
+    const row = m.closest('.msg-row');
+    const bubble = row ? row.querySelector('.bubble') : null;
+    if (!bubble) return { diag };
     const b = bubble.getBoundingClientRect();
     const r = m.getBoundingClientRect();
-    return { bubbleBottom: b.bottom, metaTop: r.top, inBubble: bubble.contains(m) };
+    return { diag, bubbleBottom: b.bottom, metaTop: r.top, inBubble: bubble.contains(m) };
 });
-ok('时间戳在气泡外部', meta && meta.inBubble === false, JSON.stringify(meta));
-ok('时间戳在气泡下方', meta && meta.metaTop >= meta.bubbleBottom - 2, JSON.stringify(meta));
+ok('时间戳在气泡外部', meta.inBubble === false, JSON.stringify(meta));
+ok('时间戳在气泡下方', typeof meta.metaTop === 'number' && meta.metaTop >= meta.bubbleBottom - 2, JSON.stringify(meta));
 await page.screenshot({ path: path.join(OUT, '06-timestamp.jpg'), type: 'jpeg', quality: 72 });
 
 // ---------- 5. Waifu 模式 ----------
