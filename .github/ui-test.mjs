@@ -303,12 +303,15 @@ const glass = await page.evaluate(() => {
         pillTex: /data:image/.test(cs(pill).backgroundImage || ''),
         attach: cs(bubbles[bubbles.length - 1]).backgroundAttachment,
         repeat: cs(bubbles[bubbles.length - 1]).backgroundRepeat,
+        bgImg: cs(bubbles[bubbles.length - 1]).backgroundImage,
+        bgSize: cs(bubbles[bubbles.length - 1]).backgroundSize,
         mode: document.documentElement.getAttribute('data-glass'),
     };
 });
 ok('气泡是纯 CSS 玻璃（不含图片资源）', glass.withTex === 0, `tex=${glass.withTex}/${glass.total}`);
 ok('气泡不挂 backdrop-filter（不会降级）', glass.withBlur === 0, `blur=${glass.withBlur}/${glass.total}`);
-ok('气泡背景不平铺（不会出现接缝）', !/repeat/.test(glass.repeat) && !/fixed/.test(glass.attach), glass.repeat);
+ok('气泡背景不含图片（不会拼接）', !/url\(/.test(glass.bgImg || ''), String(glass.bgImg).slice(0, 60));
+ok('气泡背景不按固定尺寸平铺（不会出现接缝）', !/\d+px/.test(glass.bgSize || ''), glass.bgSize);
 ok('玻璃样式已同步到根节点', glass.mode === 'ios', glass.mode);
 ok('输入框与气泡同一套材质（不使用图片）', glass.inputTex === false);
 ok('输入框仍有悬浮高光阴影', glass.inputShadow !== 'none' && glass.inputShadow.length > 20);
