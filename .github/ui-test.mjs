@@ -356,7 +356,7 @@ const tall = await page.evaluate(() => {
     let best = null;
     for (const b of document.querySelectorAll('.bubble.ios.assistant')) {
         const r = b.getBoundingClientRect();
-        if (r.height > 40 && r.top > 60 && r.bottom < window.innerHeight - 90) {
+        if (r.height > 40 && r.top > 55 && r.top < window.innerHeight * 0.62 && r.width > 80) {
             if (!best || r.height > best.h) best = { x: r.x, y: r.y, w: r.width, h: r.height };
         }
     }
