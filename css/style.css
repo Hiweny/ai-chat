@@ -3006,6 +3006,5 @@ html[data-style="none"] .bubble.assistant {
 .settings-pane { display: none; }
 .settings-pane.active { display: block; }
 
-/* 面板整体改为纵向 flex，tab 固定、内容滚动 */
-.settings-panel { display: flex; flex-direction: column; }
+/* 面板内容区滚动（面板本身在 .active 时已是 flex 列） */
 .settings-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
