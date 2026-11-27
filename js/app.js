@@ -72,6 +72,14 @@
         imageProviders: [],
         selfPortrait: '',
         imageGenEnabled: false,
+        // 识图（多模态）：默认关闭，Key 留空
+        visionEnabled: false,
+        visionProviderId: 'openrouter',
+        visionProviders: [],
+        // 联网搜索：默认关闭
+        searchEnabled: false,
+        searchSource: 'public',   // public=优先公益额度, own=优先自己的 Key
+        tavilyKey: '',
         // 模式：跟随对话，这里只记新对话的默认值
         defaultMode: 'waifu',
         waifuMergeDelay: 1400,
@@ -386,6 +394,14 @@
     const DEFAULT_IMAGE_PROVIDERS = [
         { id: 'gitee', name: 'Gitee AI（默认）', baseUrl: 'https://ai.gitee.com/v1', apiKey: '', model: 'z-image-turbo', size: '1024x1024' }
     ];
+    const DEFAULT_VISION_PROVIDERS = [
+        { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free' }
+    ];
+    // 公益 Tavily Key（实测：key2 / key5 有效；key1=key3、key4 已失效，已剔除）
+    const PUBLIC_TAVILY_KEYS = [
+        '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',
+        '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',
+    ];
 
     function ensureProviders() {
         if (!Array.isArray(settings.providers) || settings.providers.length === 0) {
@@ -396,6 +412,10 @@
         }
         if (!settings.providers.some(x => x.id === settings.chatProviderId)) settings.chatProviderId = settings.providers[0].id;
         if (!settings.imageProviders.some(x => x.id === settings.imageProviderId)) settings.imageProviderId = settings.imageProviders[0].id;
+        if (!Array.isArray(settings.visionProviders) || settings.visionProviders.length === 0) {
+            settings.visionProviders = JSON.parse(JSON.stringify(DEFAULT_VISION_PROVIDERS));
+        }
+        if (!settings.visionProviders.some(x => x.id === settings.visionProviderId)) settings.visionProviderId = settings.visionProviders[0].id;
     }
 
     function currentProvider() {
@@ -498,12 +518,37 @@
 不要主动报时间，不要在回复里提它，也不要说"根据系统时间"之类的话。`,
 
         get summary() { return SUMMARY_INSTRUCTION; },
+
+        search: `【联网搜索】
+当问题需要实时信息、具体数据、近期发生的事，或者你确实不确定时，可以联网查一下。
+查的办法：只输出下面这两行，不要输出任何别的文字：
+@@search@@ {"query": "要搜的关键词"}
+@@end@@
+我看到后会去检索，然后把结果发给你，你再基于资料正常回答。
+一次对话最多查一次；能直接答的就不用查，也不要向对方解释这个机制。`,
+
+        vision: `你在帮我读图。请客观、完整地描述这张图片，供后续对话使用：
+- 先用一句话概括主体，再按需要补充细节（人物或物体、场景、动作、构图、光线与色彩）
+- 图里有文字就原样摘录出来
+- 如果是界面截图，说明这是什么软件或页面、有哪些关键元素
+- 只做描述，不评价好坏、不展开议论、不反问，也不要输出任何元信息
+- 控制在 200 字以内，信息量大时可适当放宽`,
     };
 
     function getPrompt(key) {
         const custom = settings.prompts && settings.prompts[key];
         const v = (custom === undefined || custom === null) ? '' : String(custom).trim();
         return v || PROMPT_DEFAULTS[key] || '';
+    }
+
+    function currentVisionProvider() {
+        ensureProviders();
+        return settings.visionProviders.find(x => x.id === settings.visionProviderId) || settings.visionProviders[0] || null;
+    }
+
+    function hasVisionKey() {
+        const p = currentVisionProvider();
+        return !!(p && String(p.apiKey || '').trim() && String(p.baseUrl || '').trim() && String(p.model || '').trim());
     }
 
     function hasImageKey() {
@@ -548,7 +593,7 @@
             const brief = p.length > 140 ? p.slice(0, 140) + '…' : p;
             return `[发了一张图片，画面：${brief}]`;
         }
-        return m.content || '';
+        return m.ctx || m.content || '';
     }
 
     // 系统设定 → 现在 → 历史摘要 → waifu 协议 → 生图协议 → 打断说明
@@ -563,6 +608,7 @@
             parts.push('【格式说明】历史对话中，"User:" 开头的是对方说的话，"Assistant:" 开头的是你自己之前说过的话。不要把自己的话当成对方说的。');
         }
         if (isWaifuMode()) parts.push(getPrompt('waifu'));
+        if (settings.searchEnabled) parts.push(getPrompt('search'));
         const ip = imageProtocol();
         if (ip) parts.push(ip);
         const ib = interruptBlock();
@@ -821,6 +867,193 @@
         }
     }
 
+    // ========== 联网搜索（Tavily） ==========
+    function searchKeyList() {
+        const own = String(settings.tavilyKey || '').trim();
+        const list = [];
+        if (settings.searchSource === 'own') {
+            if (own) list.push(own);
+            PUBLIC_TAVILY_KEYS.forEach(k => list.push(k));
+        } else {
+            PUBLIC_TAVILY_KEYS.forEach(k => list.push(k));
+            if (own) list.push(own);
+        }
+        return [...new Set(list)];
+    }
+
+    async function tavilySearch(query) {
+        const q = String(query || '').trim().slice(0, 200);
+        if (!q) throw new Error('搜索词为空');
+        const keys = searchKeyList();
+        if (!keys.length) throw new Error('没有可用的搜索 Key');
+        let lastErr = null;
+        for (const k of keys) {
+            try {
+                const resp = await fetch('https://api.tavily.com/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        api_key: k, query: q, search_depth: 'basic',
+                        max_results: 5, include_answer: true, include_raw_content: false,
+                    }),
+                });
+                if (!resp.ok) {
+                    const t = await resp.text().catch(() => '');
+                    lastErr = new Error('HTTP ' + resp.status + ' ' + t.slice(0, 90));
+                    continue;   // 换下一个 key
+                }
+                const data = await resp.json();
+                if (data && Array.isArray(data.results)) return { data, query: q };
+                lastErr = new Error('搜索结果格式异常');
+            } catch (e) {
+                lastErr = e;
+            }
+        }
+        throw lastErr || new Error('搜索失败');
+    }
+
+    function parseSearchCall(text) {
+        const m = String(text || '').match(/@@search@@([\s\S]*?)@@end@@/);
+        if (!m) return '';
+        const raw = m[1].trim();
+        try {
+            const o = JSON.parse(raw);
+            if (o && o.query) return String(o.query).trim().slice(0, 200);
+        } catch (e) { /* 不是标准 JSON 就按纯文本处理 */ }
+        return raw.replace(/^[\s"'“”{]+|[\s"'“”}]+$/g, '').slice(0, 200);
+    }
+
+    function stripSearchCall(text) {
+        return String(text || '').replace(/@@search@@[\s\S]*?@@end@@/g, '').trim();
+    }
+
+    function formatSearchResults(payload) {
+        const d = payload.data || {};
+        const lines = [];
+        if (d.answer) lines.push('【自动摘要】' + String(d.answer).slice(0, 500));
+        (d.results || []).slice(0, 5).forEach((r, i) => {
+            const title = String(r.title || '').slice(0, 120);
+            const body = String(r.content || '').slice(0, 420);
+            lines.push('[' + (i + 1) + '] ' + title + '\n' + body + '\n来源: ' + String(r.url || ''));
+        });
+        return lines.join('\n\n') || '（没有检索到内容）';
+    }
+
+    // ========== 识图 ==========
+    const pendingImages = [];   // 待发送的图片（dataURL）
+    let visionBusy = false;
+
+    function loadImageEl(src) {
+        return new Promise((res, rej) => {
+            const img = new Image();
+            img.onload = () => res(img);
+            img.onerror = () => rej(new Error('图片读取失败'));
+            img.src = src;
+        });
+    }
+
+    function readFileAsDataUrl(file) {
+        return new Promise((res, rej) => {
+            const fr = new FileReader();
+            fr.onload = () => res(String(fr.result || ''));
+            fr.onerror = () => rej(new Error('读取文件失败'));
+            fr.readAsDataURL(file);
+        });
+    }
+
+    // 压到长边 1280、JPEG 0.82，控制 base64 体积（识图接口对请求体大小敏感）
+    async function compressImage(file) {
+        const raw = await readFileAsDataUrl(file);
+        const img = await loadImageEl(raw);
+        const maxSide = 1280;
+        const scale = Math.min(1, maxSide / Math.max(img.width || 1, img.height || 1));
+        const w = Math.max(1, Math.round((img.width || 1) * scale));
+        const h = Math.max(1, Math.round((img.height || 1) * scale));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        return cv.toDataURL('image/jpeg', 0.82);
+    }
+
+    async function describeImage(dataUrl) {
+        const p = currentVisionProvider();
+        if (!p) throw new Error('没有配置识图接口');
+        const base = String(p.baseUrl || '').replace(/\/+$/, '');
+        const url = /\/chat\/completions$/.test(base) ? base : base + '/chat/completions';
+        const headers = { 'Content-Type': 'application/json' };
+        if (p.apiKey) headers['Authorization'] = 'Bearer ' + p.apiKey;
+        if (/openrouter\.ai/.test(base)) {
+            headers['HTTP-Referer'] = location.origin || 'https://hiweny.github.io';
+            headers['X-Title'] = 'AI Chat';
+        }
+        const resp = await fetch(url, {
+            method: 'POST', headers,
+            body: JSON.stringify({
+                model: p.model,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: getPrompt('vision') },
+                        { type: 'image_url', image_url: { url: dataUrl } },
+                    ],
+                }],
+                // 多模态推理模型会先用大量 token 思考，给少了正文会被截断成空
+                max_tokens: 1600,
+            }),
+        });
+        if (!resp.ok) {
+            const t = await resp.text().catch(() => '');
+            throw new Error('识图接口 HTTP ' + resp.status + ' ' + t.slice(0, 120));
+        }
+        const data = await resp.json();
+        const msg = data && data.choices && data.choices[0] && data.choices[0].message;
+        let out = msg ? (msg.content || msg.reasoning_content || msg.reasoning || '') : '';
+        out = String(out).trim();
+        if (!out) throw new Error('识图接口没有返回内容');
+        return out;
+    }
+
+    function renderAttachPreview() {
+        const box = $('#attach-preview');
+        if (!box) return;
+        if (!pendingImages.length) { box.hidden = true; box.innerHTML = ''; return; }
+        box.hidden = false;
+        box.innerHTML = pendingImages.map((im, i) => `
+            <div class="attach-item">
+                <img src="${im.dataUrl}" alt="">
+                <button class="attach-remove" data-idx="${i}" aria-label="移除">×</button>
+            </div>`).join('');
+        box.querySelectorAll('.attach-remove').forEach(btn => {
+            btn.addEventListener('click', () => {
+                pendingImages.splice(Number(btn.dataset.idx), 1);
+                renderAttachPreview();
+                updateSendButtonState();
+            });
+        });
+    }
+
+    async function addImageFiles(files) {
+        const list = [...files].filter(f => f && /^image\//.test(f.type));
+        if (!list.length) return;
+        if (!settings.visionEnabled || !hasVisionKey()) {
+            showToast('先在设置里启用识图并填好 Key，才能发表情/图片', 'error', 2600);
+            return;
+        }
+        const room = 4 - pendingImages.length;
+        if (room <= 0) { showToast('一次最多 4 张图', 'error', 1800); return; }
+        for (const f of list.slice(0, room)) {
+            try {
+                const dataUrl = await compressImage(f);
+                pendingImages.push({ dataUrl });
+            } catch (e) {
+                showToast('图片处理失败：' + (e.message || ''), 'error', 2400);
+            }
+        }
+        renderAttachPreview();
+        updateSendButtonState();
+    }
+
     // ========== 毛玻璃合成层管理 ==========
     // backdrop-filter 元素一多，合成器会降级（表现为越往下气泡越"白块"）。
     // 只让视口附近的元素保留模糊，其余退回高不透明度纯色，质量始终稳定。
@@ -897,7 +1130,26 @@
             if (!skipScroll) scrollToBottom();
             return;
         } else if (msg.role === 'user') {
-            contentDiv.textContent = msg.content;
+            if (Array.isArray(msg.images) && msg.images.length) {
+                const wrap = document.createElement('div');
+                wrap.className = 'bubble-images';
+                contentDiv.appendChild(wrap);
+                msg.images.forEach(id => {
+                    imgGet(id).then(rec => {
+                        if (!rec || !rec.data) return;
+                        const im = document.createElement('img');
+                        im.src = rec.data;
+                        im.alt = '';
+                        im.addEventListener('click', () => openImageViewer(rec.data));
+                        wrap.appendChild(im);
+                    }).catch(() => { });
+                });
+                const txt = document.createElement('div');
+                txt.textContent = msg.content;
+                contentDiv.appendChild(txt);
+            } else {
+                contentDiv.textContent = msg.content;
+            }
         } else {
             contentDiv.innerHTML = renderMarkdown(msg.content);
             highlightCode(contentDiv);
@@ -1084,9 +1336,49 @@
                 promptText: prompt,
                 messages: buildMessages(userMsg),
                 signal: abortController.signal,
-                onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+                onDelta: (d) => {
+                    fullText += d;
+                    const visible = stripSearchCall(fullText);
+                    if (!visible && /@@search@@/.test(fullText)) {
+                        aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                        return;
+                    }
+                    throttledRender(aiContent, visible);
+                },
             });
             clearTimeout(timeoutId);
+
+            if (settings.searchEnabled) {
+                const sq = parseSearchCall(fullText);
+                if (sq) {
+                    try {
+                        aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                        scrollToBottom();
+                        const payload = await tavilySearch(sq);
+                        const evidence = formatSearchResults(payload);
+                        const firstClean = stripSearchCall(fullText);
+                        const secondPrompt = prompt
+                            + (firstClean ? '\n' + firstClean + '\n' : '\n')
+                            + '\n【联网检索结果】以下是刚查到的最新资料，请据此直接回答，不要提"搜索"或"资料"这些机制，必要时标注来源编号：\n'
+                            + evidence + '\n\nAssistant:';
+                        fullText = '';
+                        await callChatRetry({
+                            promptText: fitPrompt(secondPrompt),
+                            messages: buildMessages(userMsg),
+                            signal: abortController.signal,
+                            onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+                        });
+                    } catch (e) {
+                        console.error('联网搜索失败', e);
+                        fullText = stripSearchCall(fullText);
+                        if (!fullText) fullText = '（联网搜索没成功：' + (String(e && e.message) || '接口异常') + '）';
+                        aiContent.innerHTML = renderMarkdown(fullText);
+                        highlightCode(aiContent);
+                    }
+                } else {
+                    fullText = stripSearchCall(fullText);
+                }
+            }
 
             const { text, prompt: imgPrompt } = extractGenimg(fullText);
             const final = filterAd(text);
@@ -1140,7 +1432,48 @@
 
     // ========== 发送消息 ==========
     async function sendMessage(overrideText) {
-        const userMsg = (overrideText || chatInput.value).trim();
+        const typed = (overrideText || chatInput.value).trim();
+        const hasImgs = pendingImages.length > 0;
+        if (!typed && !hasImgs) return;
+        let userMsg = typed;
+        let imageIds = [];
+        let ctxText = '';
+
+        if (hasImgs) {
+            if (!settings.visionEnabled || !hasVisionKey()) {
+                showToast('识图未启用或没填 Key，先去设置里配一下', 'error', 2800);
+                return;
+            }
+            visionBusy = true;
+            updateInputState();
+            try {
+                const descs = [];
+                for (const im of pendingImages) {
+                    const d = await describeImage(im.dataUrl);
+                    descs.push(d);
+                    try {
+                        const id = uid();
+                        await imgPut({ id, data: im.dataUrl, prompt: '用户上传', createdAt: Date.now() });
+                        imageIds.push(id);
+                    } catch (e) { console.warn('上传图入库失败', e); }
+                }
+                const block = descs.length === 1
+                    ? '【图片内容】\n' + descs[0]
+                    : '【图片内容】\n' + descs.map((d, i) => '(' + (i + 1) + ') ' + d).join('\n');
+                ctxText = (typed ? typed + '\n\n' : '') + block;
+                pendingImages.splice(0);
+                renderAttachPreview();
+            } catch (e) {
+                showToast('识图失败：' + (String(e && e.message) || '未知错误'), 'error', 3200);
+                visionBusy = false;
+                updateInputState();
+                return;
+            } finally {
+                visionBusy = false;
+                updateInputState();
+            }
+            userMsg = typed || '[图片]';
+        }
         if (!userMsg) return;
 
         // 发送按钮动画
@@ -1157,6 +1490,8 @@
         updateSendButtonState();
 
         const userMsgObj = { role: 'user', content: userMsg, timestamp: Date.now(), id: uid() };
+        if (ctxText) userMsgObj.ctx = ctxText;
+        if (imageIds.length) userMsgObj.images = imageIds;
         getMessages().push(userMsgObj);
         renderMessage(userMsgObj, true);
 
@@ -1227,9 +1562,49 @@
                 promptText: prompt,
                 messages: buildMessages(userMsg),
                 signal: abortController.signal,
-                onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+                onDelta: (d) => {
+                    fullText += d;
+                    const visible = stripSearchCall(fullText);
+                    if (!visible && /@@search@@/.test(fullText)) {
+                        aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                        return;
+                    }
+                    throttledRender(aiContent, visible);
+                },
             });
             clearTimeout(timeoutId);
+
+            if (settings.searchEnabled) {
+                const sq = parseSearchCall(fullText);
+                if (sq) {
+                    try {
+                        aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                        scrollToBottom();
+                        const payload = await tavilySearch(sq);
+                        const evidence = formatSearchResults(payload);
+                        const firstClean = stripSearchCall(fullText);
+                        const secondPrompt = prompt
+                            + (firstClean ? '\n' + firstClean + '\n' : '\n')
+                            + '\n【联网检索结果】以下是刚查到的最新资料，请据此直接回答，不要提"搜索"或"资料"这些机制，必要时标注来源编号：\n'
+                            + evidence + '\n\nAssistant:';
+                        fullText = '';
+                        await callChatRetry({
+                            promptText: fitPrompt(secondPrompt),
+                            messages: buildMessages(userMsg),
+                            signal: abortController.signal,
+                            onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+                        });
+                    } catch (e) {
+                        console.error('联网搜索失败', e);
+                        fullText = stripSearchCall(fullText);
+                        if (!fullText) fullText = '（联网搜索没成功：' + (String(e && e.message) || '接口异常') + '）';
+                        aiContent.innerHTML = renderMarkdown(fullText);
+                        highlightCode(aiContent);
+                    }
+                } else {
+                    fullText = stripSearchCall(fullText);
+                }
+            }
 
             const { text, prompt: imgPrompt } = extractGenimg(fullText);
             const final = filterAd(text);
@@ -1475,6 +1850,35 @@
                 signal: abortController.signal,
                 onDelta: (d) => { fullText += d; },
             });
+
+            if (settings.searchEnabled) {
+                const sq = parseSearchCall(fullText);
+                if (sq) {
+                    try {
+                        typing.content.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
+                        const payload = await tavilySearch(sq);
+                        const evidence = formatSearchResults(payload);
+                        const firstClean = stripSearchCall(fullText);
+                        const basePrompt = fitPrompt(buildPrompt(last.content));
+                        const secondPrompt = basePrompt
+                            + (firstClean ? '\n' + firstClean + '\n' : '\n')
+                            + '\n【联网检索结果】以下是刚查到的最新资料，请据此直接回答，不要提"搜索"或"资料"这些机制：\n'
+                            + evidence + '\n\nAssistant:';
+                        fullText = '';
+                        await callChatRetry({
+                            promptText: fitPrompt(secondPrompt),
+                            messages: buildMessages(last.content),
+                            signal: abortController.signal,
+                            onDelta: (d) => { fullText += d; },
+                        });
+                    } catch (e) {
+                        console.error('联网搜索失败', e);
+                        fullText = stripSearchCall(fullText) || '（联网搜索没成功：' + (String(e && e.message) || '接口异常') + '）';
+                    }
+                } else {
+                    fullText = stripSearchCall(fullText);
+                }
+            }
             typing.row.remove();
             if (!fullText.trim()) {
                 renderSystemMessage('\u26a0\ufe0f 这次没有生成内容，可以再发一句试试');
@@ -1527,7 +1931,8 @@
     }
 
     function updateSendButtonState() {
-        const hasContent = chatInput.value.trim().length > 0;
+        if (typeof visionBusy !== 'undefined' && visionBusy) { sendBtn.disabled = true; return; }
+        const hasContent = chatInput.value.trim().length > 0 || (typeof pendingImages !== 'undefined' && pendingImages.length > 0);
         sendBtn.disabled = !hasContent || (isGenerating && !isWaifuMode());
     }
 
@@ -2250,6 +2655,101 @@ ${chunkText}
         showToast('已保存', 'success');
     }
 
+    // ========== 识图接口列表 ==========
+    let editingVisionProviderId = null;
+
+    function renderVisionProviderSelects() {
+        const sel = $('#set-visionprovider');
+        if (!sel) return;
+        ensureProviders();
+        sel.innerHTML = settings.visionProviders
+            .map(p => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
+        sel.value = settings.visionProviderId;
+    }
+
+    function openVisionProviderEditor(id) {
+        const p = settings.visionProviders.find(x => x.id === id);
+        if (!p) return;
+        editingVisionProviderId = id;
+        $('#ve-name').value = p.name || '';
+        $('#ve-url').value = p.baseUrl || '';
+        $('#ve-key').value = p.apiKey || '';
+        $('#ve-model').value = p.model || '';
+        $('#visionprovider-editor').hidden = false;
+    }
+
+    function renderVisionProviderList() {
+        const box = $('#visionprovider-list');
+        if (!box) return;
+        box.innerHTML = '';
+        settings.visionProviders.forEach(p => {
+            const el = document.createElement('div');
+            el.className = 'provider-item';
+            el.innerHTML = `<div style="min-width:0;flex:1;"><span class="p-name">${escapeHTML(p.name)}</span><span class="p-sub">${escapeHTML(p.baseUrl)} · ${escapeHTML(p.model || '')} · ${p.apiKey ? '已配置 Key' : '未配置 Key'}</span></div>`;
+            if (p.id === settings.visionProviderId) {
+                const tag = document.createElement('span');
+                tag.className = 'p-tag';
+                tag.textContent = '使用中';
+                el.appendChild(tag);
+            }
+            const edit = document.createElement('button');
+            edit.className = 'btn-small';
+            edit.textContent = '编辑';
+            edit.addEventListener('click', (e) => { e.stopPropagation(); openVisionProviderEditor(p.id); });
+            el.appendChild(edit);
+            if (settings.visionProviders.length > 1) {
+                const del = document.createElement('button');
+                del.className = 'btn-small danger';
+                del.textContent = '删除';
+                del.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (!confirm('删除识图接口「' + p.name + '」？')) return;
+                    settings.visionProviders = settings.visionProviders.filter(x => x.id !== p.id);
+                    if (!settings.visionProviders.length) settings.visionProviders = JSON.parse(JSON.stringify(DEFAULT_VISION_PROVIDERS));
+                    if (!settings.visionProviders.some(x => x.id === settings.visionProviderId)) settings.visionProviderId = settings.visionProviders[0].id;
+                    settings.visionEnabled = false;
+                    saveAll(); renderVisionProviderList(); renderVisionProviderSelects(); refreshVisionToggle();
+                });
+                el.appendChild(del);
+            }
+            el.addEventListener('click', () => {
+                settings.visionProviderId = p.id;
+                saveAll(); renderVisionProviderList(); renderVisionProviderSelects(); refreshVisionToggle();
+                showToast('已切换到「' + p.name + '」', 'success', 1500);
+            });
+            box.appendChild(el);
+        });
+    }
+
+    function refreshVisionToggle() {
+        const el = $('#set-vision');
+        const hint = $('#vision-hint');
+        if (!el) return;
+        const ok = hasVisionKey();
+        el.checked = !!settings.visionEnabled && ok;
+        el.disabled = !ok;
+        if (hint) {
+            hint.textContent = ok
+                ? '已配置识图 Key。发图时会先读图，再把描述交给聊天模型。'
+                : '未配置识图 Key，识图已关闭。点下方「编辑」填入 Key（OpenRouter 有免费多模态模型）。';
+        }
+    }
+
+    function refreshSearchToggle() {
+        const el = $('#set-search');
+        const hint = $('#search-hint');
+        const quota = $('#search-quota');
+        if (!el) return;
+        el.checked = !!settings.searchEnabled;
+        if (hint) hint.textContent = '开启后，遇到需要实时信息的问题模型会自己查一次（文本协议，任何聊天接口都能用）。';
+        if (quota) {
+            const own = !!String(settings.tavilyKey || '').trim();
+            const src = settings.searchSource === 'own' ? '优先用自己的 Key' : '优先公益额度';
+            quota.textContent = '公益额度：2 个可用 Key（已剔除失效的），当前合计剩余约 1100+ 次。'
+                + (own ? ' 已填自己的 Key，' + src + '。' : ' 未填自己的 Key，只用公益额度。');
+        }
+    }
+
     function renderImageProviderList() {
         const box = $('#imageprovider-list');
         if (!box) return;
@@ -2478,6 +2978,13 @@ ${chunkText}
         $('#set-autocompact').checked = !!settings.autoCompact;
         $('#set-waifu').checked = isWaifuMode();
         refreshImageToggle();
+        renderVisionProviderSelects();
+        renderVisionProviderList();
+        refreshVisionToggle();
+        $('#set-search').checked = !!settings.searchEnabled;
+        $('#set-searchsource').value = settings.searchSource || 'public';
+        $('#set-searchkey').value = settings.tavilyKey || '';
+        refreshSearchToggle();
         $('#set-selfportrait').value = settings.selfPortrait || '';
         $('#set-selfportrait').addEventListener('input', updateSelfPortraitHint);
         $('#set-systemprompt').value = (settings.systemPrompt || '').trim() || DEFAULT_SYSTEM_PROMPT;
@@ -2485,6 +2992,7 @@ ${chunkText}
         $('#prompt-waifu').value = getPrompt('waifu');
         $('#prompt-image').value = getPrompt('image');
         $('#prompt-summary').value = getPrompt('summary');
+        $('#prompt-vision').value = getPrompt('vision');
         const spStatus = $('#systemprompt-status');
         if (spStatus) spStatus.textContent = '';
         $('#blur-val').textContent = settings.backgroundBlur;
@@ -2502,7 +3010,7 @@ ${chunkText}
     // 把界面上的提示词写回 settings（和默认值相同就存空，跟随默认演进）
     function savePromptsFromUI() {
         settings.prompts = settings.prompts || {};
-        ['waifu', 'image', 'summary', 'time'].forEach(k => {
+        ['waifu', 'image', 'summary', 'time', 'vision'].forEach(k => {
             const el = $('#prompt-' + k);
             if (!el) return;
             const v = el.value.trim();
@@ -2518,6 +3026,10 @@ ${chunkText}
         settings.backgroundBlur = parseFloat($('#set-blur').value) || 0;
         settings.backgroundBrightness = Math.min(150, Math.max(30, parseInt($('#set-brightness').value, 10) || 100));
         settings.imageGenEnabled = $('#set-imagegen').checked;
+        settings.visionEnabled = $('#set-vision').checked;
+        settings.searchEnabled = $('#set-search').checked;
+        settings.searchSource = $('#set-searchsource').value;
+        settings.tavilyKey = ($('#set-searchkey').value || '').trim();
         savePromptsFromUI();
         const cp = currentProvider();
         const wantMax = parseInt($('#set-maxlen').value, 10) || 80000;
@@ -2837,6 +3349,29 @@ ${chunkText}
             }
         });
 
+        // 识图：选取 / 粘贴
+        const attachBtnEl = $('#attach-btn');
+        if (attachBtnEl) {
+            attachBtnEl.addEventListener('click', () => {
+                if (!settings.visionEnabled || !hasVisionKey()) {
+                    showToast('先在设置里启用识图并填好 Key', 'error', 2600);
+                    return;
+                }
+                const picker = document.createElement('input');
+                picker.type = 'file';
+                picker.accept = 'image/*';
+                picker.multiple = true;
+                picker.addEventListener('change', () => { if (picker.files) addImageFiles(picker.files); });
+                picker.click();
+            });
+        }
+
+        chatInput.addEventListener('paste', (e) => {
+            const items = [...((e.clipboardData && e.clipboardData.items) || [])];
+            const files = items.filter(it => it.type && it.type.startsWith('image/')).map(it => it.getAsFile()).filter(Boolean);
+            if (files.length) { e.preventDefault(); addImageFiles(files); }
+        });
+
         // 拖拽文件提示
         inputWrapper.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -2852,9 +3387,7 @@ ${chunkText}
             e.preventDefault();
             e.stopPropagation();
             inputWrapper.classList.remove('drag-over');
-            if (e.dataTransfer.files.length > 0) {
-                showToast('暂不支持文件输入', 'warning', 2000);
-            }
+            if (e.dataTransfer.files.length > 0) addImageFiles(e.dataTransfer.files);
         });
 
         // 字符计数
@@ -2922,6 +3455,63 @@ ${chunkText}
             showToast('已切换生图接口', 'success', 1500);
         });
         $('#imageprovider-add').addEventListener('click', () => openImageProviderEditor(null));
+
+        // 识图接口
+        const visionAdd = $('#visionprovider-add');
+        if (visionAdd) {
+            visionAdd.addEventListener('click', () => openVisionProviderEditor(null));
+            $('#ve-cancel').addEventListener('click', () => {
+                $('#visionprovider-editor').hidden = true;
+                editingVisionProviderId = null;
+            });
+            $('#ve-save').addEventListener('click', () => {
+                const name = ($('#ve-name').value || '').trim() || '识图接口';
+                const baseUrl = ($('#ve-url').value || '').trim();
+                const apiKey = ($('#ve-key').value || '').trim();
+                const model = ($('#ve-model').value || '').trim();
+                if (!baseUrl || !model) { showToast('Base URL 和模型名都要填', 'error', 2200); return; }
+                if (editingVisionProviderId) {
+                    const p = settings.visionProviders.find(x => x.id === editingVisionProviderId);
+                    if (p) { p.name = name; p.baseUrl = baseUrl; p.apiKey = apiKey; p.model = model; }
+                } else {
+                    const np = { id: uid(), name, baseUrl, apiKey, model };
+                    settings.visionProviders.push(np);
+                    settings.visionProviderId = np.id;
+                }
+                $('#visionprovider-editor').hidden = true;
+                editingVisionProviderId = null;
+                saveAll();
+                renderVisionProviderList();
+                renderVisionProviderSelects();
+                refreshVisionToggle();
+                showToast('已保存', 'success');
+            });
+            $('#set-visionprovider').addEventListener('change', (e) => {
+                settings.visionProviderId = e.target.value;
+                saveAll();
+                renderVisionProviderList();
+                refreshVisionToggle();
+            });
+            $('#set-vision').addEventListener('change', () => {
+                settings.visionEnabled = $('#set-vision').checked;
+                saveAll();
+            });
+            $('#set-search').addEventListener('change', () => {
+                settings.searchEnabled = $('#set-search').checked;
+                saveAll();
+                refreshSearchToggle();
+            });
+            $('#set-searchsource').addEventListener('change', () => {
+                settings.searchSource = $('#set-searchsource').value;
+                saveAll();
+                refreshSearchToggle();
+            });
+            $('#set-searchkey').addEventListener('input', () => {
+                settings.tavilyKey = ($('#set-searchkey').value || '').trim();
+                saveAll();
+                refreshSearchToggle();
+            });
+        }
         $('#ipe-save').addEventListener('click', saveImageProviderEditor);
         $('#ipe-cancel').addEventListener('click', () => { $('#imageprovider-editor').hidden = true; editingImageProviderId = null; });
         $('#set-selfportrait').addEventListener('change', () => {
