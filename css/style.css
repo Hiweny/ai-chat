@@ -3124,3 +3124,55 @@ html[data-style="none"][data-theme="dark"] {
     cursor: zoom-in;
     object-fit: cover;
 }
+
+/* ---- 输入框上方的处理状态提示 ---- */
+.busy-hint {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 12px;
+    margin-bottom: 6px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    border-radius: 12px;
+    background: var(--surface-2, rgba(127,127,127,.09));
+    color: var(--text-2, #5b6272);
+    animation: busyFade .22s ease;
+}
+.busy-hint[hidden] { display: none !important; }
+.busy-hint .dot-pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: currentColor; flex: 0 0 auto;
+    animation: busyPulse 1.1s ease-in-out infinite;
+}
+@keyframes busyPulse {
+    0%, 100% { opacity: .25; transform: scale(.8); box-shadow: 0 0 0 0 currentColor; }
+    50% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 3px rgba(127,127,127,.14); }
+}
+@keyframes busyFade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---- 上下文用量进度条 ---- */
+.ctx-meter {
+    margin: 4px 0 14px;
+    padding: 11px 13px;
+    border-radius: 12px;
+    background: var(--surface-2, rgba(127,127,127,.07));
+}
+.ctx-meter-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; font-weight: 600; margin-bottom: 8px;
+}
+.ctx-meter-head #ctx-meter-pct { font-size: 12px; font-weight: 700; opacity: .85; }
+.ctx-meter-track {
+    height: 7px; border-radius: 99px; overflow: hidden;
+    background: var(--surface-3, rgba(127,127,127,.18));
+}
+.ctx-meter-track > i {
+    display: block; height: 100%; width: 0%;
+    border-radius: 99px;
+    background: linear-gradient(90deg, #4cc38a, #35b37e);
+    transition: width .35s cubic-bezier(.25,.8,.3,1), background .3s;
+}
+.ctx-meter.warn .ctx-meter-track > i { background: linear-gradient(90deg, #f0b429, #e59a1c); }
+.ctx-meter.danger .ctx-meter-track > i { background: linear-gradient(90deg, #ee6a5f, #d94a3d); }
+.ctx-meter-foot { font-size: 11.5px; opacity: .62; margin-top: 7px; line-height: 1.5; }
