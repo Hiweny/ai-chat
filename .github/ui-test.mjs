@@ -626,6 +626,22 @@ ok('识图请求 max_tokens 足够（推理模型）', !!(v0 && v0.max_tokens >=
 ok('识图请求带了提示词', !!(v0 && v0.messages[0].content.some(c => c.type === 'text' && c.text && c.text.length > 10)));
 const lastChatReq = await page.evaluate(() => window.__lastChatReq || '');
 ok('聊天请求里带上了【图片内容】描述', /【图片内容】/.test(lastChatReq) && /红色圆形/.test(lastChatReq), lastChatReq.slice(0, 200));
+const imgPlace = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('.msg-row.user')].pop();
+    if (!row) return null;
+    const wrap = row.querySelector('.msg-images');
+    const inBubble = row.querySelector('.bubble .bubble-images, .bubble .msg-images');
+    return {
+        hasWrap: !!wrap,
+        count: wrap ? wrap.querySelectorAll('img').length : 0,
+        inBubble: !!inBubble,
+        h: wrap && wrap.querySelector('img') ? Math.round(wrap.querySelector('img').getBoundingClientRect().height) : 0,
+    };
+});
+ok('用户图片挂在气泡外', imgPlace && imgPlace.hasWrap && !imgPlace.inBubble, JSON.stringify(imgPlace));
+ok('用户图片是缩小缩略图', imgPlace && imgPlace.h > 40 && imgPlace.h < 110, String(imgPlace && imgPlace.h));
+ok('多图缩略图数量正确', imgPlace && imgPlace.count === 2, String(imgPlace && imgPlace.count));
+
 ok('多图：prompt 标明图片张数并逐张编号', /一共发了 2 张/.test(lastChatReq) && /第 1 张/.test(lastChatReq) && /第 2 张/.test(lastChatReq), lastChatReq.slice(0, 260));
 ok('带图这一轮不提供生图能力', !/genimg/.test(lastChatReq), lastChatReq.slice(0, 200));
 ok('识图结束后状态条收起', await page.evaluate(() => document.getElementById('busy-hint').hidden));
