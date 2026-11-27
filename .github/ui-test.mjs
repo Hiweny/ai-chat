@@ -349,6 +349,29 @@ ok('胶囊条跟随水玻璃样式', alphaOf(water.pillColor) < 0.3, water.pillC
 ok('输入框与气泡是同一档透明度', Math.abs(alphaOf(water.inputColor) - 0.16) < 0.06, water.inputColor);
 ok('根节点样式已切到 water', water.mode === 'water', water.mode);
 
+// 色带检测：截气泡内部左 padding 的竖条，交给 python 逐行比对
+await page.evaluate(() => { const c = document.querySelector('.messages-container'); c.scrollTop = c.scrollHeight; });
+await page.waitForTimeout(400);
+const tall = await page.evaluate(() => {
+    let best = null;
+    for (const b of document.querySelectorAll('.bubble.ios.assistant')) {
+        const r = b.getBoundingClientRect();
+        if (r.height > 40 && r.top > 60 && r.bottom < window.innerHeight - 90) {
+            if (!best || r.height > best.h) best = { x: r.x, y: r.y, w: r.width, h: r.height };
+        }
+    }
+    return best;
+});
+if (tall) {
+    await page.screenshot({
+        path: path.join(OUT, 'bubble-strip.png'),
+        clip: { x: Math.round(tall.x + 4), y: Math.round(tall.y + 6), width: 10, height: Math.round(tall.h - 12) },
+    });
+    ok('截到气泡竖条用于色带检测', true, `h=${Math.round(tall.h)}`);
+} else {
+    ok('截到气泡竖条用于色带检测', false, 'no tall bubble');
+}
+
 // 侧栏
 await page.click('#menu-btn');
 await page.waitForTimeout(600);
