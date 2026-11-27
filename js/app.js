@@ -3125,7 +3125,7 @@ ${chunkText}
 
     // ========== 设置面板分区 ==========
     const SETTINGS_TABS = [
-        { id: 'service', label: '服务', sections: ['聊天服务', '生图服务'] },
+        { id: 'service', label: '服务', sections: ['聊天服务', '生图服务', '识图服务', '联网搜索'] },
         { id: 'persona', label: '人格', sections: ['系统提示词', '提示词工程'] },
         { id: 'chat', label: '对话', sections: ['对话行为'] },
         { id: 'look', label: '外观', sections: ['外观', '头像', '背景'] },
