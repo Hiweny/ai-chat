@@ -605,6 +605,96 @@ ok('识图请求带了提示词', !!(visionReq && visionReq.messages[0].content.
 ok('聊天请求里带上了【图片内容】描述', /【图片内容】/.test(chatReq) && /红色圆形/.test(chatReq), chatReq.slice(0, 160));
 ok('识图结束后状态条收起', await page.evaluate(() => document.getElementById('busy-hint').hidden));
 
+// ---------- 6.8 OpenAI 兼容接口：走原生 function calling ----------
+const nativeReqs = [];
+await page.route('**/api.test.local/**', async route => {
+    let body = {};
+    try { body = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
+    nativeReqs.push(body);
+    const hasToolMsg = (body.messages || []).some(m => m.role === 'tool');
+    if (!hasToolMsg && Array.isArray(body.tools) && body.tools.length) {
+        const sse = [
+            'data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '' } }] } }] }) + '\n\n',
+            'data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"query":"北京天气"}' } }] } }] }) + '\n\n',
+            'data: [DONE]\n\n',
+        ].join('');
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse });
+        return;
+    }
+    await route.fulfill({
+        status: 200, contentType: 'text/event-stream',
+        body: 'data: ' + JSON.stringify({ choices: [{ delta: { content: '北京今天晴，18 度。' } }] }) + '\n\ndata: [DONE]\n\n',
+    });
+});
+let tavilyHits = 0;
+await page.route('**/api.tavily.com/**', async route => {
+    tavilyHits++;
+    await route.fulfill({
+        status: 200, contentType: 'application/json',
+        body: JSON.stringify({ query: '北京天气', answer: '晴，18度', results: [{ title: '北京天气预报', content: '今天晴，最高 18 度', url: 'https://weather.example/bj' }] }),
+    });
+});
+
+await page.click('#settings-top-btn');
+await page.waitForTimeout(400);
+await gotoTab('服务');
+await page.click('#provider-add');
+await page.waitForTimeout(250);
+await page.fill('#pe-name', '测试接口');
+await page.fill('#pe-url', 'https://api.test.local/v1');
+await page.fill('#pe-key', 'sk-test');
+await page.fill('#pe-model', 'test-model');
+await page.click('#pe-save');
+await page.waitForTimeout(500);
+const curProv = await page.evaluate(() => {
+    const sel = document.getElementById('set-provider');
+    return sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '';
+});
+ok('已切到 OpenAI 兼容接口', /测试接口/.test(curProv), curProv);
+
+// 开启联网搜索
+await page.evaluate(() => {
+    const el = document.getElementById('set-search');
+    if (el) { el.checked = true; el.dispatchEvent(new Event('change', { bubbles: true })); }
+});
+await page.waitForTimeout(200);
+await page.click('#close-settings');
+await page.waitForTimeout(400);
+
+await page.fill('#chat-input', '北京今天天气怎么样');
+await page.click('#send-btn');
+await page.waitForTimeout(3000);
+
+ok('第一轮请求带原生 tools 声明', nativeReqs.length > 0 && Array.isArray(nativeReqs[0].tools)
+    && nativeReqs[0].tools[0] && nativeReqs[0].tools[0].function.name === 'web_search',
+    JSON.stringify(nativeReqs[0] && nativeReqs[0].tools));
+ok('tool_choice = auto（模型自己决定搜不搜）', nativeReqs[0] && nativeReqs[0].tool_choice === 'auto', String(nativeReqs[0] && nativeReqs[0].tool_choice));
+ok('Tavily 被真实调用', tavilyHits > 0, String(tavilyHits));
+const secondReq = nativeReqs.find(r => (r.messages || []).some(m => m.role === 'tool'));
+ok('第二轮把检索结果作为 tool 消息回传', !!secondReq && /天气预报/.test(JSON.stringify(secondReq.messages || [])),
+    secondReq ? JSON.stringify(secondReq.messages.slice(-2)).slice(0, 200) : 'no second req');
+ok('assistant 消息带 tool_calls', !!secondReq && (secondReq.messages || []).some(m => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length));
+ok('最终回答上屏', await page.evaluate(() => {
+    const rows = document.querySelectorAll('.msg-row.assistant .bubble-content');
+    return rows.length > 0 && rows[rows.length - 1].textContent.includes('北京今天晴');
+}));
+await page.screenshot({ path: path.join(OUT, '19-native-tools.jpg'), type: 'jpeg', quality: 72 });
+
+// 关掉搜索后再问，不应带 tools（"不是每条消息都搜"）
+await page.click('#settings-top-btn');
+await page.waitForTimeout(400);
+await page.evaluate(() => {
+    const el = document.getElementById('set-search');
+    if (el) { el.checked = false; el.dispatchEvent(new Event('change', { bubbles: true })); }
+});
+await page.click('#close-settings');
+await page.waitForTimeout(300);
+nativeReqs.length = 0;
+await page.fill('#chat-input', '我们随便聊聊吧');
+await page.click('#send-btn');
+await page.waitForTimeout(1500);
+ok('关闭联网时不带 tools', nativeReqs.length > 0 && !(nativeReqs[0] && nativeReqs[0].tools), JSON.stringify(Object.keys(nativeReqs[0] || {})));
+
 // ---------- 6.7 上下文进度条 ----------
 await page.click('#settings-top-btn');
 await page.waitForTimeout(500);
