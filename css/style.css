@@ -267,12 +267,10 @@ html, body {
     height: 100dvh;
     background-color: transparent;
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.20) 100%),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll;
-    background-size: 100% 100%, 148px 148px;
-    background-position: center, center;
-    background-repeat: no-repeat, repeat;
+        linear-gradient(180deg, rgba(255,255,255,0.42) 0%, rgba(255,255,255,0.26) 100%);
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
     backdrop-filter: blur(40px) saturate(185%) brightness(1.02);
     -webkit-backdrop-filter: blur(40px) saturate(185%) brightness(1.02);
     border-right: 1px solid var(--glass-sheet-border);
@@ -553,13 +551,11 @@ html, body {
     border-radius: 999px;
     background-color: var(--glass-tint);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.04) 52%, rgba(255,255,255,0) 100%),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll;
-    background-size: 100% 100%, 148px 148px;
-    background-position: center, center;
-    background-repeat: no-repeat, repeat;
-    border: 1px solid var(--glass-edge);
+        linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.04) 52%, rgba(255,255,255,0) 100%);
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
+    border: 1px solid var(--glass-edge-c);
     box-shadow:
         0 10px 26px -16px rgba(15,23,42,0.30),
         inset 0 1px 0 rgba(255,255,255,0.95);
@@ -848,14 +844,8 @@ html, body {
 /* 核心：气泡不挂 backdrop-filter。
    Chromium 对 backdrop-filter 有合成预算——元素变多 / 单块面积变大就会降级，
    采样区域变化时还会临时丢层，表现出来就是"发出时闪一下""越往下越白"。
-   这里改用启动时预生成的柔光平铺纹理 --glass-tex（壁纸缩到 16x16 再放大，只保留色调），
-   气泡是「白纱 + 柔光 + 高光 + 阴影」的稳定组合：
-   不用 backdrop-filter、不用 fixed 背景、不做进场动画 —— 没有任何会建立/销毁合成层的操作，
-   所以既不会降级，也不会闪。 */
-
-/* 纹理还没就绪时先给不透明度更高的底，避免"先纯色后变玻璃"的跳变 */
-html:not([data-glass-ready]) .bubble.ios.assistant,
-html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
+   气泡改用纯 CSS 玻璃：白纱/蓝纱底色 + 一层径向柔光（顶部亮点）+ 细高光边 + 外投影。
+   没有图片、没有平铺、没有定位、没有进场动画 —— 既不会降级、不会闪，也不会出现拼接接缝。 */
 
 .bubble.modern.user {
     background: var(--bubble-user-bg);
@@ -872,16 +862,12 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
     box-shadow: var(--shadow-xs);
 }
 
-/* ---- 毛玻璃：厚玻璃，白纱感强 ---- */
+/* ---- 毛玻璃：厚玻璃 ---- */
 .bubble.ios.assistant {
     background-color: rgba(255, 255, 255, 0.62);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.05) 42%, rgba(255,255,255,0) 100%),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll;
-    background-size: 100% 100%, 148px 148px;
-    background-position: center, center;
-    background-repeat: no-repeat, repeat;
+        radial-gradient(140% 100% at 12% 0%, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.10) 38%, rgba(255,255,255,0) 68%),
+        linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 55%, rgba(0,0,0,0.015) 100%);
     color: var(--text-primary);
     border: 1px solid var(--glass-edge);
     border-bottom-left-radius: 6px;
@@ -894,12 +880,8 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
 .bubble.ios.user {
     background-color: rgba(45, 120, 220, 0.68);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.02) 48%, rgba(255,255,255,0) 100%),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll;
-    background-size: 100% 100%, 148px 148px;
-    background-position: center, center;
-    background-repeat: no-repeat, repeat;
+        radial-gradient(140% 100% at 12% 0%, rgba(255,255,255,0.30) 0%, rgba(255,255,255,0.06) 42%, rgba(255,255,255,0) 70%),
+        linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 60%, rgba(0,0,0,0.03) 100%);
     color: #fff;
     border: 1px solid rgba(255,255,255,0.30);
     border-bottom-right-radius: 6px;
@@ -909,16 +891,12 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
         inset 0 0 0 1px rgba(255,255,255,0.10);
 }
 
-/* ---- 水玻璃：薄、透、折射感 ---- */
+/* ---- 水玻璃：薄、透 ---- */
 .bubble.water.assistant {
     background-color: rgba(255, 255, 255, 0.20);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.36) 0%, rgba(255,255,255,0.02) 58%, rgba(255,255,255,0.06) 100%),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll;
-    background-size: 100% 100%, 148px 148px;
-    background-position: center, center;
-    background-repeat: no-repeat, repeat;
+        radial-gradient(150% 110% at 10% -10%, rgba(255,255,255,0.62) 0%, rgba(255,255,255,0.16) 34%, rgba(255,255,255,0) 66%),
+        linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.04) 100%);
     color: var(--text-primary);
     border: 1px solid rgba(255,255,255,0.55);
     border-bottom-left-radius: 6px;
@@ -931,13 +909,8 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
 .bubble.water.user {
     background-color: rgba(56, 128, 232, 0.50);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.06) 46%, rgba(255,255,255,0.12) 100%),
-        linear-gradient(rgba(255,255,255,0.12), rgba(255,255,255,0.12)),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll, scroll;
-    background-size: 100% 100%, 100% 100%, 148px 148px;
-    background-position: center, center, center;
-    background-repeat: no-repeat, no-repeat, no-repeat;
+        radial-gradient(150% 110% at 10% -10%, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.08) 40%, rgba(255,255,255,0) 68%),
+        linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0) 62%, rgba(255,255,255,0.03) 100%);
     color: #fff;
     border: 1px solid rgba(255,255,255,0.34);
     border-bottom-right-radius: 6px;
@@ -950,8 +923,7 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
 /* ---- 暗色：只换纱的颜色，纹理与高光共用 ---- */
 [data-theme="dark"] #sidebar {
     background-image:
-        linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%),
-        var(--glass-tex, none);
+        linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%);
 }
 [data-theme="dark"] .bubble.ios.assistant { background-color: rgba(50,50,56,0.58); border-color: rgba(255,255,255,0.10); box-shadow: 0 12px 30px -18px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.12); }
 [data-theme="dark"] .bubble.water.assistant { background-color: rgba(44,44,50,0.20); border-color: rgba(255,255,255,0.12); box-shadow: 0 16px 38px -20px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.14); }
@@ -960,8 +932,7 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
 @media (prefers-color-scheme: dark) {
     [data-theme="auto"] #sidebar {
         background-image:
-            linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%),
-            var(--glass-tex, none);
+            linear-gradient(180deg, rgba(30,30,36,0.44) 0%, rgba(22,22,26,0.30) 100%);
     }
     [data-theme="auto"] .bubble.ios.assistant { background-color: rgba(50,50,56,0.58); border-color: rgba(255,255,255,0.10); box-shadow: 0 12px 30px -18px rgba(0,0,0,0.62), inset 0 1px 0 rgba(255,255,255,0.12); }
     [data-theme="auto"] .bubble.water.assistant { background-color: rgba(44,44,50,0.20); border-color: rgba(255,255,255,0.12); box-shadow: 0 16px 38px -20px rgba(0,0,0,0.60), inset 0 1px 0 rgba(255,255,255,0.14); }
@@ -1373,12 +1344,10 @@ html:not([data-glass-ready]) .bubble.water.assistant { background-image: none; }
     gap: 8px;
     background-color: var(--glass-tint);
     background-image:
-        linear-gradient(180deg, rgba(255,255,255,0.52) 0%, rgba(255,255,255,0.03) 46%, rgba(255,255,255,0) 100%),
-        var(--glass-tex, none);
-    background-attachment: scroll, scroll;
-    background-size: 100% 100%, 148px 148px;
-    background-position: center, center;
-    background-repeat: no-repeat, repeat;
+        linear-gradient(180deg, rgba(255,255,255,0.52) 0%, rgba(255,255,255,0.03) 46%, rgba(255,255,255,0) 100%);
+    background-size: 100% 100%;
+    background-position: center;
+    background-repeat: no-repeat;
     backdrop-filter: blur(36px) saturate(195%) brightness(1.05);
     -webkit-backdrop-filter: blur(36px) saturate(195%) brightness(1.05);
     border: 1px solid var(--glass-edge-c);
