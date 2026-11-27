@@ -71,7 +71,8 @@ src = src.replace(/\}\)\(\);\s*$/, `
     window.__TEST__ = { buildPrompt, buildMessages, headBlocks, extractGenimg, splitWaifuMessages,
         settings, conversations, ensureProviders, currentProvider, currentImageProvider,
         setActive: (id) => { activeConvId = id; }, getMessages, MAX_PROMPT_CHARS, waifu, fitPrompt,
-        parseSearchCall, stripSearchCall, searchKeyList, PUBLIC_TAVILY_KEYS };
+        parseSearchCall, stripSearchCall, searchKeyList, PUBLIC_TAVILY_KEYS,
+        stripThinkingText, historyMsgs, withEvidence };
 })();
 `);
 vm.runInContext(src, ctx, { filename: 'app.js' });
@@ -98,10 +99,10 @@ T.setActive(cid);
 
 // 时间注入
 const p1 = T.buildPrompt('U2');
-ok('prompt 含隐性时间', p1.includes('心里有数') && /\d{4}年\d{1,2}月\d{1,2}日/.test(p1));
+ok('prompt 含隐性时间', p1.includes('【当前时间】') && /\d{4}年\d{1,2}月\d{1,2}日/.test(p1));
 ok('时间提示不挂在嘴边', p1.includes('不要主动报时间'));
 ok('时间块包含判断说明', p1.includes('自然用上') || p1.includes('知道'));
-ok('时间块在消息之前', p1.indexOf('心里有数') < p1.indexOf('User: U1'));
+ok('时间块在消息之前', p1.indexOf('【当前时间】') < p1.indexOf('User: U1'));
 
 // 系统提示词
 T.settings.systemPrompt = '全局角色：猫娘';
@@ -126,7 +127,7 @@ T.settings.selfPortrait = 'black hair, white hoodie';
 ok('自画像写进协议', T.buildPrompt('U2').includes('black hair, white hoodie'));
 T.settings.selfPortrait = '';
 
-// waifu 一轮多条 AI 消息时，保留轮数按轮算
+// 保留轮数只影响压缩，不影响每次发送的历史
 const cid2 = 'c2';
 T.conversations[cid2] = { id: cid2, title: 'w', summary: '', messages: [
     { role: 'user', content: 'R1U' }, { role: 'assistant', content: 'R1A1' }, { role: 'assistant', content: 'R1A2' }, { role: 'assistant', content: 'R1A3' },
@@ -134,14 +135,10 @@ T.conversations[cid2] = { id: cid2, title: 'w', summary: '', messages: [
     { role: 'user', content: 'R3U' },
 ], createdAt: 1, updatedAt: 1 };
 T.setActive(cid2);
-T.settings.recentRounds = 1;
+T.settings.recentRounds = 1;   // 压缩保留轮数，不应该影响发送
 const pw = T.buildPrompt('R3U');
-ok('waifu 下按轮截取：只带最后一轮的 AI 多条消息', pw.includes('R2A1') && pw.includes('R2A2') && !pw.includes('R1A1'), JSON.stringify(pw.slice(-200)));
-// 0 = 不限：历史一条都不能少（曾经默认 10 轮静默截断）
-T.settings.recentRounds = 0;
-T.setActive(cid2);
-const pAll = T.buildPrompt('R3U');
-ok('轮数=0 时历史不截断', pAll.includes('R1U') && pAll.includes('R1A1') && pAll.includes('R2A1'), JSON.stringify(pAll.slice(0, 160)));
+ok('历史全部发送，不受「保留轮数」影响', pw.includes('R1U') && pw.includes('R1A1') && pw.includes('R2A2'), JSON.stringify(pw.slice(-160)));
+ok('本轮消息只出现一次', (pw.match(/R3U/g) || []).length === 1, `count=${(pw.match(/R3U/g) || []).length}`);
 T.settings.recentRounds = 10;
 T.setActive(cid);
 
@@ -252,6 +249,26 @@ T.conversations[cid].mode = 'normal';
     ok('OpenAI 兼容接口不注入文本协议（改走原生 tools）', !T.buildPrompt('U').includes('@@search@@'));
     T.settings.searchEnabled = false;
 }
+
+if (process.env.DUMP_PROMPT) {
+    T.settings.searchEnabled = true;
+    T.settings.imageGenEnabled = true;
+    T.conversations['dump'] = { id: 'dump', title: 'd', summary: '早期聊了考试和天气', messages: [
+        { role: 'user', content: '我明天考试' }, { role: 'assistant', content: '加油' }, { role: 'user', content: '好紧张' }
+    ], mode: 'normal', createdAt: 1, updatedAt: 1 };
+    T.setActive('dump');
+    console.log('=====PROMPT=====');
+    console.log(T.buildPrompt('帮我复习'));
+    console.log('=====END=====');
+}
+// 识图：只取正文，思考内容必须丢掉
+ok('识图剥离 <thinking> 块', T.stripThinkingText('<thinking>先分析一下</thinking>一只橘猫趴在窗台') === '一只橘猫趴在窗台', T.stripThinkingText('<thinking>先分析一下</thinking>一只橘猫趴在窗台'));
+ok('识图剥离思考前缀', T.stripThinkingText('思考过程：先看主体。\n一只橘猫') === '先看主体。\n一只橘猫', JSON.stringify(T.stripThinkingText('思考过程：先看主体。\n一只橘猫')));
+
+// 提示词结构分段
+const pStruct = T.buildPrompt('你好');
+ok('prompt 有【本轮】段', pStruct.includes('【本轮】\nUser: 你好'), JSON.stringify(pStruct.slice(-80)));
+ok('prompt 不再有旧版格式说明段', !pStruct.includes('【格式说明】'));
 
 console.log('\n============ 结果 ============');
 for (const [st, n, e] of R) console.log(`${st}  ${n}${e ? '  (' + e + ')' : ''}`);
