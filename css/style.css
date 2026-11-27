@@ -757,7 +757,8 @@ html, body {
 }
 
 .welcome-greeting {
-    font-family: var(--font-display);
+    /* 显示字体只含拉丁字形，中文必须靠后面的字体栈兜底，否则会渲染成方框 */
+    font-family: var(--font-display), var(--font-body), 'Noto Sans SC', -apple-system, sans-serif;
     font-size: 42px;
     font-weight: 400;
     font-style: italic;
@@ -1551,7 +1552,7 @@ html[data-glass="plain"] #sidebar { background-image: none; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px 24px 6px;
+    padding: 16px 24px 2px;
 }
 
 .settings-header h3 {
@@ -2981,7 +2982,7 @@ html[data-style="none"] .bubble.assistant {
     top: 0;
     display: flex;
     gap: 4px;
-    padding: 4px 12px 10px;
+    padding: 2px 12px 10px;
     background: var(--t-panel-bg, var(--bg-secondary));
     border-bottom: 1px solid var(--t-surf-bd, var(--border-color));
     z-index: 6;
