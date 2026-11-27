@@ -2880,9 +2880,16 @@ html[data-style] .bubble.assistant {
     box-shadow: var(--t-bub-a-sh, none);
 }
 /* 玻璃主题：叠一层顶部内高光，做出厚度 */
+/* 厚玻璃：顶部窄而亮的反光 + 中段缓慢衰减 + 底部极淡的环境反光 */
 html[data-style="ios"] .bubble.assistant,
 html[data-style="water"] .bubble.assistant {
-    background-image: linear-gradient(180deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.12) 26%, rgba(255,255,255,0.04) 58%, rgba(255,255,255,0) 100%);
+    background-image: linear-gradient(180deg,
+        rgba(255,255,255,0.55) 0%,
+        rgba(255,255,255,0.26) 12%,
+        rgba(255,255,255,0.10) 34%,
+        rgba(255,255,255,0.03) 62%,
+        rgba(255,255,255,0.06) 88%,
+        rgba(255,255,255,0.10) 100%);
 }
 html[data-style="ios"] .bubble.user,
 html[data-style="water"] .bubble.user {
