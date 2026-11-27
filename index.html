@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261128b">
+    <link rel="stylesheet" href="css/style.css?v=20261128c">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
 </head>
 <body>
@@ -384,8 +384,8 @@
                     </label>
                 </div>
                 <div class="setting-item">
-                    <label>保留最近轮数 <span class="hint-text">(不参与压缩)</span></label>
-                    <input type="number" id="set-rounds" min="1" max="50" value="10">
+                    <label>发送历史轮数 <span class="hint-text">(0 = 全部不截断)</span></label>
+                    <input type="number" id="set-rounds" min="0" max="200" value="0">
                 </div>
                 <div class="setting-item">
                     <label class="checkbox-label">
@@ -510,6 +510,6 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
-    <script src="js/app.js?v=20261128b"></script>
+    <script src="js/app.js?v=20261128c"></script>
 </body>
 </html>
