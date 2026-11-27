@@ -1551,8 +1551,7 @@ html[data-glass="plain"] #sidebar { background-image: none; }
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 24px 16px;
-    border-bottom: 1px solid var(--border-color);
+    padding: 18px 24px 6px;
 }
 
 .settings-header h3 {
@@ -2982,7 +2981,7 @@ html[data-style="none"] .bubble.assistant {
     top: 0;
     display: flex;
     gap: 4px;
-    padding: 10px 12px 8px;
+    padding: 4px 12px 10px;
     background: var(--t-panel-bg, var(--bg-secondary));
     border-bottom: 1px solid var(--t-surf-bd, var(--border-color));
     z-index: 6;
@@ -3015,3 +3014,9 @@ html[data-style="none"] .bubble.assistant {
 
 /* 面板内容区滚动（面板本身在 .active 时已是 flex 列） */
 .settings-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+
+/* 窄屏下设置分区标签收紧，避免挤爆 */
+@media (max-width: 380px) {
+    .settings-tab { font-size: 12px; padding: 8px 1px; }
+    .settings-tabs { gap: 2px; padding: 4px 8px 8px; }
+}
