@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261128d">
+    <link rel="stylesheet" href="css/style.css?v=20261128e">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
 </head>
 <body>
@@ -340,29 +340,38 @@
             <!-- 提示词工程 -->
             <div class="settings-section">
                 <div class="section-title">提示词工程</div>
-                <div class="hint-text" style="margin-bottom:8px;line-height:1.5;">
-                    这些规则会一起发给模型。可以按自己的习惯改，点「恢复默认」即还原。
+                <div class="hint-text" style="margin-bottom:10px;line-height:1.5;">
+                    这些规则会按固定顺序拼进每次请求的开头（人设 → 时间 → 摘要 → 规则 → 历史 → 本轮）。改完保存即生效，「恢复默认」可还原。
                 </div>
+
+                <div class="pw-group-title">对话</div>
                 <div class="setting-item">
-                    <label>时间感知（隐性） <button class="btn-small" data-reset="time">恢复默认</button></label>
-                    <textarea id="prompt-time" rows="5"></textarea>
+                    <label>时间感知 <button class="btn-small" data-reset="time">恢复默认</button></label>
+                    <textarea id="prompt-time" rows="4"></textarea>
                 </div>
                 <div class="setting-item">
                     <label>聊天节奏（Waifu 模式） <button class="btn-small" data-reset="waifu">恢复默认</button></label>
                     <textarea id="prompt-waifu" rows="7"></textarea>
                 </div>
+
+                <div class="pw-group-title">能力</div>
                 <div class="setting-item">
                     <label>生图规则 <button class="btn-small" data-reset="image">恢复默认</button></label>
                     <textarea id="prompt-image" rows="7"></textarea>
                 </div>
                 <div class="setting-item">
-                    <label>压缩摘要 <button class="btn-small" data-reset="summary">恢复默认</button></label>
-                    <textarea id="prompt-summary" rows="7"></textarea>
+                    <label>联网搜索 <span class="hint-text">(免费接口用；OpenAI 兼容走原生工具)</span> <button class="btn-small" data-reset="search">恢复默认</button></label>
+                    <textarea id="prompt-search" rows="6"></textarea>
+                </div>
+
+                <div class="pw-group-title">内部处理</div>
+                <div class="setting-item">
+                    <label>识图提示词 <span class="hint-text">(只给识图模型，不进对话)</span> <button class="btn-small" data-reset="vision">恢复默认</button></label>
+                    <textarea id="prompt-vision" rows="7"></textarea>
                 </div>
                 <div class="setting-item">
-                    <label>识图提示词 <button class="btn-small" data-reset="vision">恢复默认</button></label>
-                    <textarea id="prompt-vision" rows="7"></textarea>
-                    <div class="hint-text" style="margin-top:4px;">这张提示词决定识图模型怎么描述图片，可以按自己的喜好改。</div>
+                    <label>压缩摘要 <span class="hint-text">(上下文超阈值时自动总结用)</span> <button class="btn-small" data-reset="summary">恢复默认</button></label>
+                    <textarea id="prompt-summary" rows="7"></textarea>
                 </div>
             </div>
 
@@ -384,8 +393,8 @@
                     </label>
                 </div>
                 <div class="setting-item">
-                    <label>发送历史轮数 <span class="hint-text">(0 = 全部不截断)</span></label>
-                    <input type="number" id="set-rounds" min="0" max="200" value="0">
+                    <label>保留最近轮数 <span class="hint-text">(压缩时保留原文，只总结更早的)</span></label>
+                    <input type="number" id="set-rounds" min="1" max="50" value="10">
                 </div>
                 <div class="setting-item">
                     <label class="checkbox-label">
@@ -510,6 +519,6 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
-    <script src="js/app.js?v=20261128d"></script>
+    <script src="js/app.js?v=20261128e"></script>
 </body>
 </html>
