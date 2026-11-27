@@ -155,6 +155,15 @@ T.settings.imageProviders[0].apiKey = 'test-key';
 ok('开启生图时有 genimg 协议', T.buildPrompt('U2').includes('genimg'));
 T.settings.imageGenEnabled = false;
 ok('关闭生图后协议消失', !T.buildPrompt('U2').includes('genimg'));
+
+// 用户发图的那一轮，不能给他生图能力（否则会"让他看图，他给你画一张"）
+T.settings.imageGenEnabled = true;
+T.settings.imageProviders[0].apiKey = 'test-key';
+ok('普通轮次有生图协议', T.buildPrompt('U3').includes('genimg'));
+ok('带图轮次 prompt 不含生图协议', !T.buildPrompt('U3', undefined, { noImage: true }).includes('genimg'));
+ok('带图轮次 system 也不含生图协议', !String(T.buildMessages('U3', undefined, { noImage: true })[0].content).includes('genimg'));
+ok('生图协议里写明看图不要画图', T.buildPrompt('U3').includes('不要生图'));
+T.settings.imageGenEnabled = false;
 T.settings.imageGenEnabled = true;
 
 // 图片消息参与上下文（用画面描述）
