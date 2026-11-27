@@ -41,6 +41,14 @@ await ctx.addInitScript(() => {
 });
 
 const page = await ctx.newPage();
+async function gotoTab(label) {
+    await page.evaluate((l) => {
+        const b = [...document.querySelectorAll('.settings-tab')].find(x => x.textContent.trim() === l);
+        if (b) b.click();
+    }, label);
+    await page.waitForTimeout(280);
+}
+
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
 page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
@@ -134,6 +142,7 @@ ok('普通模式不拆分多消息', !String(aiText).includes('|||'), JSON.strin
 // 时间戳开关
 await page.click('#settings-top-btn');
 await page.waitForTimeout(300);
+await gotoTab('外观');
 await page.check('#set-timestamp');
 await page.click('#close-settings');
 await page.waitForTimeout(600);
@@ -262,6 +271,7 @@ await page.screenshot({ path: path.join(OUT, '09-after-reload.jpg'), type: 'jpeg
 // 先切到毛玻璃预设（默认为"现代简约"，不含模糊）
 await page.click('#settings-top-btn');
 await page.waitForTimeout(500);
+await gotoTab('外观');
 await page.selectOption('#set-bubble', 'ios');
 await page.waitForTimeout(200);
 await page.click('#close-settings');
@@ -326,6 +336,7 @@ ok('胶囊条与气泡同一套材质（不使用图片）', glass.pillTex === f
 // 水玻璃预设
 await page.click('#settings-top-btn');
 await page.waitForTimeout(500);
+await gotoTab('外观');
 await page.selectOption('#set-bubble', 'water');
 await page.waitForTimeout(200);
 await page.click('#close-settings');
@@ -421,6 +432,7 @@ ok('点击分区能切到对应内容', activePane === 'look', activePane);
 await page.screenshot({ path: path.join(OUT, '12-settings-tabs.jpg'), type: 'jpeg', quality: 72 });
 
 // 切到微信主题
+await gotoTab('外观');
 await page.selectOption('#set-bubble', 'wechat');
 await page.waitForTimeout(200);
 await page.click('#close-settings');
@@ -442,6 +454,7 @@ ok('微信接收气泡是纯白', /255,\s*255,\s*255/.test(wx.aiBg), wx.aiBg);
 // 切到 iMessage
 await page.click('#settings-top-btn');
 await page.waitForTimeout(400);
+await gotoTab('外观');
 await page.selectOption('#set-bubble', 'imessage');
 await page.waitForTimeout(200);
 await page.click('#close-settings');
@@ -457,6 +470,7 @@ await page.screenshot({ path: path.join(OUT, '13-theme-imessage.jpg'), type: 'jp
 // 回到默认（现代简约）
 await page.click('#settings-top-btn');
 await page.waitForTimeout(400);
+await gotoTab('外观');
 await page.selectOption('#set-bubble', 'modern');
 await page.waitForTimeout(200);
 await page.click('#close-settings');
