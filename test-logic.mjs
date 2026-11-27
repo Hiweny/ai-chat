@@ -70,7 +70,8 @@ let src = fs.readFileSync('/sandbox/workspace/ai-chat/js/app.js', 'utf8');
 src = src.replace(/\}\)\(\);\s*$/, `
     window.__TEST__ = { buildPrompt, buildMessages, headBlocks, extractGenimg, splitWaifuMessages,
         settings, conversations, ensureProviders, currentProvider, currentImageProvider,
-        setActive: (id) => { activeConvId = id; }, getMessages, MAX_PROMPT_CHARS, waifu, fitPrompt };
+        setActive: (id) => { activeConvId = id; }, getMessages, MAX_PROMPT_CHARS, waifu, fitPrompt,
+        parseSearchCall, stripSearchCall, searchKeyList, PUBLIC_TAVILY_KEYS };
 })();
 `);
 vm.runInContext(src, ctx, { filename: 'app.js' });
@@ -158,6 +159,30 @@ T.settings.imageGenEnabled = true;
 T.conversations[cid].messages.push({ role: 'assistant', type: 'image', prompt: 'a girl selfie, sunlight', id: 'img1' });
 ok('图片以画面描述进入上下文', T.buildPrompt('U2').includes('画面：a girl selfie'));
 T.conversations[cid].messages.pop();
+
+// 联网搜索：标记解析
+ok('能解析 @@search@@ 标记', T.parseSearchCall('@@search@@ {"query":"今天金价"} @@end@@') === '今天金价');
+ok('非 JSON 也能兜底解析', T.parseSearchCall('@@search@@ 明天天气 @@end@@') === '明天天气');
+ok('普通回答不会被误判', T.parseSearchCall('你好呀') === '');
+ok('strip 能去掉标记', T.stripSearchCall('@@search@@ {"query":"x"} @@end@@') === '');
+ok('strip 保留正常文字', T.stripSearchCall('先说一句 @@search@@ {"query":"x"} @@end@@ 结束').includes('先说一句'));
+ok('开启搜索才注入协议', (function () {
+    T.settings.searchEnabled = false;
+    const a = T.buildPrompt('U2').includes('@@search@@');
+    T.settings.searchEnabled = true;
+    const b = T.buildPrompt('U2').includes('@@search@@');
+    T.settings.searchEnabled = false;
+    return a === false && b === true;
+})());
+ok('公益 Key 列表只有 2 个有效项', T.PUBLIC_TAVILY_KEYS.length === 2, String(T.PUBLIC_TAVILY_KEYS.length));
+ok('自有 Key 优先时排第一', (function () {
+    T.settings.searchSource = 'own'; T.settings.tavilyKey = 'tvly-own';
+    const a = T.searchKeyList()[0] === 'tvly-own';
+    T.settings.searchSource = 'public';
+    const b = T.searchKeyList().slice(-1)[0] === 'tvly-own';
+    T.settings.tavilyKey = '';
+    return a && b;
+})());
 
 // 模式互不影响
 T.conversations['c2'] = { id: 'c2', title: 'w', mode: 'waifu', messages: [{ role: 'user', content: 'hi' }], summary: '', createdAt: 1, updatedAt: 1 };
