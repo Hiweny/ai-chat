@@ -2604,70 +2604,6 @@ ${chunkText}
             : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css';
     }
 
-    // ========== 预模糊玻璃纹理 ==========
-    // 气泡不挂 backdrop-filter：元素一多 Chromium 会降级，滚动/出现时还会闪。
-    // 改成启动时把壁纸模糊一次存成 dataURL，气泡用 background-attachment:fixed 取用，
-    // 位置与背后的 #bg-layer 严格对齐 —— 视觉等于毛玻璃，成本约等于零。
-    let glassTexUrl = '';
-    let glassTexTask = null;
-
-    function isDarkNow() {
-        return settings.colorScheme === 'dark' ||
-            (settings.colorScheme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    }
-
-    function buildGlassTexture() {
-        const root = document.documentElement;
-        const url = String(settings.backgroundImage || '').trim();
-        if (!url) { root.style.removeProperty('--glass-tex'); return Promise.resolve(); }
-        if (glassTexTask) return glassTexTask;
-
-        glassTexTask = (async () => {
-            try {
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                img.decoding = 'async';
-                img.src = url;
-                if (img.decode) await img.decode();
-                else await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
-
-                // 缩到 16x16 再放大 => 天然的柔和色块，和壁纸色调一致但不含任何位置信息
-                const tiny = document.createElement('canvas');
-                tiny.width = 16; tiny.height = 16;
-                const tt = tiny.getContext('2d');
-                tt.drawImage(img, 0, 0, 16, 16);
-
-                const T = 128;
-                const tile = document.createElement('canvas');
-                tile.width = T; tile.height = T;
-                const tg = tile.getContext('2d');
-                tg.imageSmoothingEnabled = true;
-                tg.imageSmoothingQuality = 'high';
-                tg.drawImage(tiny, 0, 0, T, T);
-
-                // 做成半透明，底下的白纱/蓝纱能透上来
-                tg.globalCompositeOperation = 'destination-in';
-                tg.fillStyle = 'rgba(0,0,0,0.34)';
-                tg.fillRect(0, 0, T, T);
-                tg.globalCompositeOperation = 'source-over';
-
-                glassTexUrl = tile.toDataURL('image/png');
-                const warm = new Image();
-                warm.src = glassTexUrl;
-                if (warm.decode) warm.decode().catch(() => {});
-                root.style.setProperty('--glass-tex', 'url("' + glassTexUrl + '")');
-                root.setAttribute('data-glass-ready', '');
-            } catch (e) {
-                console.warn('玻璃纹理生成失败，回退纯色玻璃', e);
-                glassTexUrl = '';
-                document.documentElement.style.removeProperty('--glass-tex');
-            } finally {
-                glassTexTask = null;
-            }
-        })();
-        return glassTexTask;
-    }
-
     function applyBackground() {
         const bgLayer = $('#bg-layer');
         const bgMask = $('#bg-mask');
@@ -2689,7 +2625,6 @@ ${chunkText}
             ? `rgba(${isDark ? '20,20,24' : '250,249,246'},${isDark ? 0.18 : 0.10})`
             : `rgba(${isDark ? '26,26,30' : '248,247,244'},1)`;
 
-        buildGlassTexture();
     }
 
     function toggleFullscreen() {
