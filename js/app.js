@@ -58,7 +58,7 @@
     let settings = {
         maxPromptLength: 80000,
         warnThreshold: 56000,
-        recentRounds: 10,
+        recentRounds: 0,          // 0 = 不限，全部历史都发给 AI
         autoCompact: true,
         systemPrompt: DEFAULT_SYSTEM_PROMPT,
         bubbleStyle: 'modern',
@@ -293,6 +293,12 @@
                 activeConvId = d.activeConvId || null;
             }
         } catch (e) { console.error('读取设置失败', e); }
+
+        // ---- 1.5 迁移：旧的「保留最近轮数=10」会静默截断发送历史，一次性放开 ----
+        if (!settings.turnQuotaMigrated) {
+            if (!settings.recentRounds || settings.recentRounds === 10) settings.recentRounds = 0;
+            settings.turnQuotaMigrated = true;
+        }
 
         // ---- 2. 从旧版 localStorage 迁移（只做一次） ----
         try {
@@ -608,7 +614,7 @@
             parts.push('【格式说明】历史对话中，"User:" 开头的是对方说的话，"Assistant:" 开头的是你自己之前说过的话。不要把自己的话当成对方说的。');
         }
         if (isWaifuMode()) parts.push(getPrompt('waifu'));
-        if (settings.searchEnabled) parts.push(getPrompt('search'));
+        if (settings.searchEnabled && currentProvider().type !== 'openai') parts.push(getPrompt('search'));
         const ip = imageProtocol();
         if (ip) parts.push(ip);
         const ib = interruptBlock();
@@ -621,7 +627,8 @@
     function historyMsgs(userMsg) {
         let msgs = getMessages().slice();
         if (userMsg && msgs.length > 0 && msgs[msgs.length - 1].role === 'user') msgs = msgs.slice(0, -1);
-        const rounds = Math.max(1, parseInt(settings.recentRounds, 10) || 10);
+        const rounds = parseInt(settings.recentRounds, 10) || 0;
+        if (rounds <= 0) return msgs;      // 0 = 不限：不再静默截断历史
         let start = msgs.length;
         let r = 0;
         while (start > 0 && r < rounds) {
@@ -631,25 +638,26 @@
         return msgs.slice(start);
     }
 
-    function buildPrompt(userMsg) {
+    function buildPrompt(userMsg, extra) {
         const parts = [headBlocks()];
         for (const m of historyMsgs(userMsg)) {
             parts.push((m.role === 'user' ? 'User: ' : 'Assistant: ') + msgText(m));
         }
         if (userMsg) {
             parts.push(`User: ${userMsg}`);
+            if (extra) parts.push(extra);
             parts.push('Assistant:');
         }
         return parts.join('\n');
     }
 
     // OpenAI 兼容接口用 messages 结构
-    function buildMessages(userMsg) {
+    function buildMessages(userMsg, extra) {
         const arr = [{ role: 'system', content: headBlocks() }];
         for (const m of historyMsgs(userMsg)) {
             arr.push({ role: m.role === 'user' ? 'user' : 'assistant', content: msgText(m) });
         }
-        if (userMsg) arr.push({ role: 'user', content: userMsg });
+        if (userMsg) arr.push({ role: 'user', content: extra ? userMsg + '\n\n' + extra : userMsg });
         return arr;
     }
 
@@ -662,8 +670,7 @@
             let produced = false;
             const wrapped = { ...opts, onDelta: (d) => { if (d && d.length) produced = true; opts.onDelta(d); } };
             try {
-                await callChat(wrapped);
-                return;
+                return await callChat(wrapped);
             } catch (e) {
                 lastErr = e;
                 if (e && e.name === 'AbortError') throw e;
@@ -677,33 +684,78 @@
         throw lastErr;
     }
 
+    // 原生 function calling 的搜索工具声明：由模型自己决定要不要搜
+    const WEB_SEARCH_TOOL = {
+        type: 'function',
+        function: {
+            name: 'web_search',
+            description: '联网搜索。当需要实时信息（新闻、天气、价格、赛事比分、最新政策、近期发生的事）或你不确定的事实时调用。一次查一个主题。',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: { type: 'string', description: '搜索关键词，简洁具体，例如「2026年诺贝尔文学奖得主」' }
+                },
+                required: ['query']
+            }
+        }
+    };
+
+    function mergeToolCall(acc, tc) {
+        const i = (tc && tc.index != null) ? tc.index : 0;
+        const cur = acc[i] || (acc[i] = { id: '', name: '', arguments: '' });
+        if (tc.id) cur.id = tc.id;
+        const fn = tc.function || {};
+        if (fn.name) cur.name = fn.name;          // 名字通常只在首片出现，覆盖而不是拼接，避免重复
+        if (fn.arguments) cur.arguments += fn.arguments;
+        return acc;
+    }
+
+    // 统一返回 { text, toolCalls }
     async function callChat(opts) {
-        const { promptText, messages, onDelta, signal } = opts;
+        const { promptText, messages, onDelta, signal, tools } = opts;
         const p = currentProvider();
+        const out = { text: '', toolCalls: [] };
 
         if (p.type === 'openai') {
             const url = p.baseUrl.replace(/\/+$/, '') + '/chat/completions';
             const headers = { 'Content-Type': 'application/json' };
             if (p.apiKey) headers['Authorization'] = 'Bearer ' + p.apiKey;
+            const body = { model: p.model || 'gpt-3.5-turbo', messages, stream: true };
+            if (Array.isArray(tools) && tools.length) {
+                body.tools = tools;
+                body.tool_choice = 'auto';
+            }
             const resp = await fetch(url, {
                 method: 'POST', headers, signal,
-                body: JSON.stringify({ model: p.model || 'gpt-3.5-turbo', messages, stream: true }),
+                body: JSON.stringify(body),
             });
             if (!resp.ok) {
                 const t = await resp.text().catch(() => '');
-                throw new Error(`HTTP ${resp.status} ${t.slice(0, 120)}`);
+                throw new Error(`HTTP ${resp.status} ${t.slice(0, 160)}`);
             }
             const ct = resp.headers.get('content-type') || '';
             if (ct.includes('application/json')) {
                 const j = await resp.json();
-                const c0 = j.choices && j.choices[0];
-                const txt = c0 && (c0.message ? c0.message.content : c0.text);
-                if (txt) onDelta(txt);
-                return;
+                const c0 = (j.choices && j.choices[0]) || {};
+                const msg = c0.message || {};
+                const txt = msg.content || c0.text || '';
+                if (txt) { out.text += txt; onDelta(txt); }
+                if (Array.isArray(msg.tool_calls)) {
+                    msg.tool_calls.forEach((tc, i) => {
+                        out.toolCalls.push({
+                            id: tc.id || ('call_' + i),
+                            name: (tc.function && tc.function.name) || '',
+                            arguments: (tc.function && tc.function.arguments) || '{}',
+                        });
+                    });
+                }
+                return out;
             }
             const reader = resp.body.getReader();
             const dec = new TextDecoder();
             let buf = '';
+            const acc = [];
+            outer:
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
@@ -714,18 +766,25 @@
                     buf = buf.slice(idx + 1);
                     if (!line.startsWith('data:')) continue;
                     const data = line.slice(5).trim();
-                    if (data === '[DONE]') return;
+                    if (data === '[DONE]') break outer;
                     try {
                         const j = JSON.parse(data);
-                        const c0 = j.choices && j.choices[0];
-                        const d = c0 && c0.delta ? c0.delta.content : null;
-                        if (d) onDelta(d);
+                        const c0 = (j.choices && j.choices[0]) || {};
+                        const d = c0.delta || {};
+                        if (d.content) { out.text += d.content; onDelta(d.content); }
+                        if (Array.isArray(d.tool_calls)) d.tool_calls.forEach(tc => mergeToolCall(acc, tc));
                     } catch (e) { /* 分片不完整，忽略 */ }
                 }
             }
-            return;
+            acc.forEach((c, i) => {
+                if (c && (c.name || c.arguments)) {
+                    out.toolCalls.push({ id: c.id || ('call_' + i), name: c.name, arguments: c.arguments || '{}' });
+                }
+            });
+            return out;
         }
 
+        // 免费接口：纯文本流
         const resp = await fetch(p.baseUrl || API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -741,8 +800,11 @@
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            onDelta(dec.decode(value, { stream: true }));
+            const d = dec.decode(value, { stream: true });
+            out.text += d;
+            onDelta(d);
         }
+        return out;
     }
 
     // ========== 生图 ==========
@@ -939,9 +1001,30 @@
         return lines.join('\n\n') || '（没有检索到内容）';
     }
 
+    // 第二轮请求要让「所有类型」的接口都能看到检索结果：
+    // 免费接口走 promptText，OpenAI 兼容走 messages，这里补一条 user 消息兜住后者
+    function withEvidence(messages, evidence, firstClean) {
+        const arr = Array.isArray(messages) ? messages.slice() : [];
+        const head = (firstClean ? firstClean + '\n\n' : '')
+            + '【联网检索结果】以下是刚查到的最新资料，请据此直接回答，不要提"搜索"或"资料"这些机制，必要时标注来源编号：\n'
+            + evidence;
+        arr.push({ role: 'user', content: head });
+        return arr;
+    }
+
     // ========== 识图 ==========
     const pendingImages = [];   // 待发送的图片（dataURL）
     let visionBusy = false;
+
+    // 输入框上方的处理状态（识图 / 联网检索）
+    function setBusyHint(text) {
+        const box = document.getElementById('busy-hint');
+        const t = document.getElementById('busy-hint-text');
+        if (!box) return;
+        if (!text) { box.hidden = true; if (t) t.textContent = ''; return; }
+        if (t) t.textContent = text;
+        box.hidden = false;
+    }
 
     function loadImageEl(src) {
         return new Promise((res, rej) => {
@@ -1332,10 +1415,14 @@
 
         try {
             let fullText = '';
-            await callChatRetry({
+            const useNativeTools = settings.searchEnabled && currentProvider().type === 'openai';
+            let chatMessages = buildMessages(userMsg);
+
+            const turn = await callChatRetry({
                 promptText: prompt,
-                messages: buildMessages(userMsg),
+                messages: chatMessages,
                 signal: abortController.signal,
+                tools: useNativeTools ? [WEB_SEARCH_TOOL] : null,
                 onDelta: (d) => {
                     fullText += d;
                     const visible = stripSearchCall(fullText);
@@ -1348,14 +1435,56 @@
             });
             clearTimeout(timeoutId);
 
-            if (settings.searchEnabled) {
+            // 原生工具调用：模型自己决定要搜 → 真正执行 → 以 tool 消息回传 → 再答一次
+            let didNativeSearch = false;
+            if (useNativeTools && turn && Array.isArray(turn.toolCalls) && turn.toolCalls.length) {
+                const calls = turn.toolCalls.filter(c => c && c.name === 'web_search').slice(0, 3);
+                if (calls.length) {
+                    didNativeSearch = true;
+                    aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                    scrollToBottom();
+                    chatMessages.push({
+                        role: 'assistant',
+                        content: turn.text || '',
+                        tool_calls: calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })),
+                    });
+                    for (const c of calls) {
+                        let q = '';
+                        try { q = String(((JSON.parse(c.arguments || '{}') || {}).query) || ''); } catch (e) { q = String(c.arguments || ''); }
+                        q = q.trim() || String(userMsg).slice(0, 80);
+                        setBusyHint('正在联网搜索：' + q.slice(0, 26));
+                        let toolText = '';
+                        try {
+                            const payload = await tavilySearch(q);
+                            toolText = formatSearchResults(payload);
+                        } catch (e) {
+                            toolText = '搜索失败：' + (String(e && e.message) || '接口异常');
+                        }
+                        setBusyHint('');
+                        chatMessages.push({ role: 'tool', tool_call_id: c.id, content: toolText });
+                    }
+                    fullText = '';
+                    aiContent.innerHTML = '';
+                    await callChatRetry({
+                        promptText: prompt,
+                        messages: chatMessages,
+                        signal: abortController.signal,
+                        tools: null,
+                        onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+                    });
+                }
+            }
+
+            if (settings.searchEnabled && !didNativeSearch) {
                 const sq = parseSearchCall(fullText);
                 if (sq) {
                     try {
                         aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
                         scrollToBottom();
+                        setBusyHint('正在联网搜索…');
                         const payload = await tavilySearch(sq);
                         const evidence = formatSearchResults(payload);
+                        setBusyHint('');
                         const firstClean = stripSearchCall(fullText);
                         const secondPrompt = prompt
                             + (firstClean ? '\n' + firstClean + '\n' : '\n')
@@ -1364,12 +1493,13 @@
                         fullText = '';
                         await callChatRetry({
                             promptText: fitPrompt(secondPrompt),
-                            messages: buildMessages(userMsg),
+                            messages: withEvidence(buildMessages(userMsg), evidence, firstClean),
                             signal: abortController.signal,
                             onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
                         });
                     } catch (e) {
                         console.error('联网搜索失败', e);
+                        setBusyHint('');
                         fullText = stripSearchCall(fullText);
                         if (!fullText) fullText = '（联网搜索没成功：' + (String(e && e.message) || '接口异常') + '）';
                         aiContent.innerHTML = renderMarkdown(fullText);
@@ -1435,62 +1565,39 @@
         const typed = (overrideText || chatInput.value).trim();
         const hasImgs = pendingImages.length > 0;
         if (!typed && !hasImgs) return;
-        let userMsg = typed;
-        let imageIds = [];
-        let ctxText = '';
 
-        if (hasImgs) {
-            if (!settings.visionEnabled || !hasVisionKey()) {
-                showToast('识图未启用或没填 Key，先去设置里配一下', 'error', 2800);
-                return;
-            }
-            visionBusy = true;
-            updateInputState();
-            try {
-                const descs = [];
-                for (const im of pendingImages) {
-                    const d = await describeImage(im.dataUrl);
-                    descs.push(d);
-                    try {
-                        const id = uid();
-                        await imgPut({ id, data: im.dataUrl, prompt: '用户上传', createdAt: Date.now() });
-                        imageIds.push(id);
-                    } catch (e) { console.warn('上传图入库失败', e); }
-                }
-                const block = descs.length === 1
-                    ? '【图片内容】\n' + descs[0]
-                    : '【图片内容】\n' + descs.map((d, i) => '(' + (i + 1) + ') ' + d).join('\n');
-                ctxText = (typed ? typed + '\n\n' : '') + block;
-                pendingImages.splice(0);
-                renderAttachPreview();
-            } catch (e) {
-                showToast('识图失败：' + (String(e && e.message) || '未知错误'), 'error', 3200);
-                visionBusy = false;
-                updateInputState();
-                return;
-            } finally {
-                visionBusy = false;
-                updateInputState();
-            }
-            userMsg = typed || '[图片]';
+        if (hasImgs && (!settings.visionEnabled || !hasVisionKey())) {
+            showToast('识图未启用或没填 Key，先去设置里配一下', 'error', 2800);
+            return;
         }
+
+        const shots = hasImgs ? pendingImages.slice() : [];
+        const userMsg = typed || (hasImgs ? '[图片]' : '');
         if (!userMsg) return;
 
-        // 发送按钮动画
+        // ---- 先上屏：消息和图片立刻出现在对话里，不等识图 ----
+        pendingImages.splice(0);
+        renderAttachPreview();
         sendBtn.classList.add('sending');
         setTimeout(() => sendBtn.classList.remove('sending'), 400);
 
         if (!activeConvId || !conversations[activeConvId]) {
             createConversation(userMsg.slice(0, 30));
         }
-
         chatInput.value = '';
         autoResizeInput();
         updateCharCount();
         updateSendButtonState();
 
         const userMsgObj = { role: 'user', content: userMsg, timestamp: Date.now(), id: uid() };
-        if (ctxText) userMsgObj.ctx = ctxText;
+        const imageIds = [];
+        for (const im of shots) {
+            try {
+                const id = uid();
+                await imgPut({ id, data: im.dataUrl, prompt: '用户上传', createdAt: Date.now() });
+                imageIds.push(id);
+            } catch (e) { console.warn('上传图入库失败', e); }
+        }
         if (imageIds.length) userMsgObj.images = imageIds;
         getMessages().push(userMsgObj);
         renderMessage(userMsgObj, true);
@@ -1506,6 +1613,38 @@
         saveAll();
         updateStats();
 
+        // ---- 再识图：状态挂在输入框上方，识完再请求 ----
+        let sendText = userMsg;
+        if (shots.length) {
+            visionBusy = true;
+            updateInputState();
+            setBusyHint(shots.length > 1 ? `正在识图（1/${shots.length}）…` : '正在识图…');
+            try {
+                const descs = [];
+                for (let i = 0; i < shots.length; i++) {
+                    if (shots.length > 1) setBusyHint(`正在识图（${i + 1}/${shots.length}）…`);
+                    descs.push(await describeImage(shots[i].dataUrl));
+                }
+                const block = descs.length === 1
+                    ? '【图片内容】\n' + descs[0]
+                    : '【图片内容】\n' + descs.map((d, i) => '(' + (i + 1) + ') ' + d).join('\n');
+                userMsgObj.ctx = (typed ? typed + '\n\n' : '') + block;
+                sendText = userMsgObj.ctx;
+                saveAll();
+            } catch (e) {
+                const m = String(e && e.message) || '未知错误';
+                showToast('识图失败：' + m, 'error', 3400);
+                userMsgObj.visionFailed = true;
+                sendText = (typed ? typed + '\n\n' : '') + '【图片内容】\n（这张图片没能识别成功，你看不到画面内容）';
+                userMsgObj.ctx = sendText;
+                saveAll();
+            } finally {
+                visionBusy = false;
+                updateInputState();
+                setBusyHint('');
+            }
+        }
+
         // Waifu 模式：消息先进缓冲，等用户停手再统一回复
         if (isWaifuMode()) {
             if (isGenerating && abortController) {
@@ -1516,7 +1655,7 @@
             return;
         }
 
-        await runNormalTurn(userMsg);
+        await runNormalTurn(sendText);
     }
 
     // ---------- 普通模式：一问一答，流式 ----------
@@ -1526,7 +1665,7 @@
         let prompt = buildPrompt(userMsg);
         const cap = providerMaxChars();
         const warnAt = providerWarnChars();
-        if (settings.autoCompact && prompt.length > cap) {
+        if (settings.autoCompact && prompt.length > Math.min(warnAt, cap)) {
             renderSystemMessage(`\u26a0\ufe0f 上下文已达 ${prompt.length} 字符，正在自动压缩旧消息...`);
             const ok = await compactConversation({ manual: false, silent: false });
             if (ok) prompt = buildPrompt(userMsg);
@@ -1558,10 +1697,14 @@
 
         try {
             let fullText = '';
-            await callChatRetry({
+            const useNativeTools = settings.searchEnabled && currentProvider().type === 'openai';
+            let chatMessages = buildMessages(userMsg);
+
+            const turn = await callChatRetry({
                 promptText: prompt,
-                messages: buildMessages(userMsg),
+                messages: chatMessages,
                 signal: abortController.signal,
+                tools: useNativeTools ? [WEB_SEARCH_TOOL] : null,
                 onDelta: (d) => {
                     fullText += d;
                     const visible = stripSearchCall(fullText);
@@ -1574,14 +1717,56 @@
             });
             clearTimeout(timeoutId);
 
-            if (settings.searchEnabled) {
+            // 原生工具调用：模型自己决定要搜 → 真正执行 → 以 tool 消息回传 → 再答一次
+            let didNativeSearch = false;
+            if (useNativeTools && turn && Array.isArray(turn.toolCalls) && turn.toolCalls.length) {
+                const calls = turn.toolCalls.filter(c => c && c.name === 'web_search').slice(0, 3);
+                if (calls.length) {
+                    didNativeSearch = true;
+                    aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+                    scrollToBottom();
+                    chatMessages.push({
+                        role: 'assistant',
+                        content: turn.text || '',
+                        tool_calls: calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })),
+                    });
+                    for (const c of calls) {
+                        let q = '';
+                        try { q = String(((JSON.parse(c.arguments || '{}') || {}).query) || ''); } catch (e) { q = String(c.arguments || ''); }
+                        q = q.trim() || String(userMsg).slice(0, 80);
+                        setBusyHint('正在联网搜索：' + q.slice(0, 26));
+                        let toolText = '';
+                        try {
+                            const payload = await tavilySearch(q);
+                            toolText = formatSearchResults(payload);
+                        } catch (e) {
+                            toolText = '搜索失败：' + (String(e && e.message) || '接口异常');
+                        }
+                        setBusyHint('');
+                        chatMessages.push({ role: 'tool', tool_call_id: c.id, content: toolText });
+                    }
+                    fullText = '';
+                    aiContent.innerHTML = '';
+                    await callChatRetry({
+                        promptText: prompt,
+                        messages: chatMessages,
+                        signal: abortController.signal,
+                        tools: null,
+                        onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
+                    });
+                }
+            }
+
+            if (settings.searchEnabled && !didNativeSearch) {
                 const sq = parseSearchCall(fullText);
                 if (sq) {
                     try {
                         aiContent.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
                         scrollToBottom();
+                        setBusyHint('正在联网搜索…');
                         const payload = await tavilySearch(sq);
                         const evidence = formatSearchResults(payload);
+                        setBusyHint('');
                         const firstClean = stripSearchCall(fullText);
                         const secondPrompt = prompt
                             + (firstClean ? '\n' + firstClean + '\n' : '\n')
@@ -1590,12 +1775,13 @@
                         fullText = '';
                         await callChatRetry({
                             promptText: fitPrompt(secondPrompt),
-                            messages: buildMessages(userMsg),
+                            messages: withEvidence(buildMessages(userMsg), evidence, firstClean),
                             signal: abortController.signal,
                             onDelta: (d) => { fullText += d; throttledRender(aiContent, fullText); },
                         });
                     } catch (e) {
                         console.error('联网搜索失败', e);
+                        setBusyHint('');
                         fullText = stripSearchCall(fullText);
                         if (!fullText) fullText = '（联网搜索没成功：' + (String(e && e.message) || '接口异常') + '）';
                         aiContent.innerHTML = renderMarkdown(fullText);
@@ -1844,20 +2030,58 @@
 
         let fullText = '';
         try {
-            await callChatRetry({
-                promptText: fitPrompt(buildPrompt(last.content)),
-                messages: buildMessages(last.content),
+            const wPrompt = fitPrompt(buildPrompt(last.content));
+            const wMessages = buildMessages(last.content);
+            const wNative = settings.searchEnabled && currentProvider().type === 'openai';
+            const wTurn = await callChatRetry({
+                promptText: wPrompt,
+                messages: wMessages,
                 signal: abortController.signal,
+                tools: wNative ? [WEB_SEARCH_TOOL] : null,
                 onDelta: (d) => { fullText += d; },
             });
 
-            if (settings.searchEnabled) {
+            let wDidSearch = false;
+            if (wNative && wTurn && Array.isArray(wTurn.toolCalls) && wTurn.toolCalls.length) {
+                const calls = wTurn.toolCalls.filter(c => c && c.name === 'web_search').slice(0, 3);
+                if (calls.length) {
+                    wDidSearch = true;
+                    wMessages.push({
+                        role: 'assistant',
+                        content: wTurn.text || '',
+                        tool_calls: calls.map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })),
+                    });
+                    for (const c of calls) {
+                        let q = '';
+                        try { q = String(((JSON.parse(c.arguments || '{}') || {}).query) || ''); } catch (e) { q = String(c.arguments || ''); }
+                        q = q.trim() || String(last.content || '').slice(0, 80);
+                        setBusyHint('正在联网搜索：' + q.slice(0, 26));
+                        let toolText = '';
+                        try { toolText = formatSearchResults(await tavilySearch(q)); }
+                        catch (e) { toolText = '搜索失败：' + (String(e && e.message) || '接口异常'); }
+                        setBusyHint('');
+                        wMessages.push({ role: 'tool', tool_call_id: c.id, content: toolText });
+                    }
+                    fullText = '';
+                    await callChatRetry({
+                        promptText: wPrompt,
+                        messages: wMessages,
+                        signal: abortController.signal,
+                        tools: null,
+                        onDelta: (d) => { fullText += d; },
+                    });
+                }
+            }
+
+            if (settings.searchEnabled && !wDidSearch) {
                 const sq = parseSearchCall(fullText);
                 if (sq) {
                     try {
                         typing.content.innerHTML = '<div class="typing-bubble"><i></i><i></i><i></i></div>';
+                        setBusyHint('正在联网搜索…');
                         const payload = await tavilySearch(sq);
                         const evidence = formatSearchResults(payload);
+                        setBusyHint('');
                         const firstClean = stripSearchCall(fullText);
                         const basePrompt = fitPrompt(buildPrompt(last.content));
                         const secondPrompt = basePrompt
@@ -1867,12 +2091,13 @@
                         fullText = '';
                         await callChatRetry({
                             promptText: fitPrompt(secondPrompt),
-                            messages: buildMessages(last.content),
+                            messages: withEvidence(buildMessages(last.content), evidence, firstClean),
                             signal: abortController.signal,
                             onDelta: (d) => { fullText += d; },
                         });
                     } catch (e) {
                         console.error('联网搜索失败', e);
+                        setBusyHint('');
                         fullText = stripSearchCall(fullText) || '（联网搜索没成功：' + (String(e && e.message) || '接口异常') + '）';
                     }
                 } else {
@@ -2221,7 +2446,7 @@ ${chunkText}
         const conv = currentConv();
         if (!conv) { if (manual) showToast('当前没有对话可压缩', 'warning'); return false; }
 
-        const keepRounds = Math.max(1, parseInt(settings.recentRounds, 10) || 10);
+        const keepRounds = 4;   // 压缩后固定保留最近 4 轮原文
         const total = conv.messages.length;
         let keepStart = total;
         let rr = 0;
@@ -2535,6 +2760,21 @@ ${chunkText}
         const extra = p.type === 'free' ? '；免费接口请求体硬上限 256 KB' : '';
         el.textContent = `上下文：${len} 字符 / ${(bytes / 1024).toFixed(1)} KB（${pct}%，上限 ${limit}${extra}）`;
         el.className = (pct >= warnPct) ? 'context-usage warning' : 'context-usage';
+
+        // 对话行为区的进度条
+        const meter = document.getElementById('ctx-meter-fill');
+        if (meter) {
+            const box = meter.closest('.ctx-meter');
+            const pctEl = document.getElementById('ctx-meter-pct');
+            const footEl = document.getElementById('ctx-meter-text');
+            meter.style.width = Math.max(1.5, pct) + '%';
+            if (pctEl) pctEl.textContent = pct + '%';
+            if (footEl) footEl.textContent = `${len.toLocaleString()} / ${limit.toLocaleString()} 字符 · ${(bytes / 1024).toFixed(1)} KB · 提醒阈值 ${warnPct}%`;
+            if (box) {
+                box.classList.toggle('danger', pct >= 90);
+                box.classList.toggle('warn', pct >= warnPct && pct < 90);
+            }
+        }
     }
 
     function updateCharCount() {
