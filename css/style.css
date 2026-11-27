@@ -3051,3 +3051,76 @@ html[data-style="none"][data-theme="dark"] {
     --t-panel-bg: #2c2c2e;
   }
 }
+
+/* ============================================================
+   识图：输入框挂载图片
+   ============================================================ */
+.attach-preview {
+    max-width: 780px;
+    margin: 0 auto 8px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 0 2px;
+}
+
+.attach-item {
+    position: relative;
+    width: 62px;
+    height: 62px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--t-surf-bd, var(--border-color));
+    box-shadow: 0 6px 16px -10px rgba(0,0,0,0.45);
+    background: var(--bg-tertiary);
+}
+
+.attach-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.attach-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+}
+
+.btn-attach {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex: 0 0 auto;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.btn-attach:hover { background: var(--accent-light); color: var(--accent); }
+.btn-attach:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* 气泡里的用户上传图 */
+.bubble-images { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+.bubble-images img {
+    max-width: 150px;
+    max-height: 150px;
+    border-radius: 12px;
+    display: block;
+    cursor: zoom-in;
+    object-fit: cover;
+}
