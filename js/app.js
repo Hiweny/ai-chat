@@ -2585,10 +2585,12 @@ ${chunkText}
     }
 
     // 把模式写进当前对话（同时记住作为下一个新对话的默认）
-    function applyWaifuFlag(on) {
+    function applyWaifuFlag(on, alsoDefault) {
         const conv = currentConv();
         if (conv) conv.mode = on ? 'waifu' : 'normal';
-        settings.defaultMode = on ? 'waifu' : 'normal';
+        // 只有用户主动勾选/取消时才改「新对话的默认模式」，
+        // 打开设置面板同步复选框状态时不能动它，否则会覆盖出厂默认。
+        if (alsoDefault) settings.defaultMode = on ? 'waifu' : 'normal';
         if (!on) {
             clearTimeout(waifu.timer);
             waifu.timer = null;
@@ -2859,7 +2861,7 @@ ${chunkText}
         // 模式切换
         $('#mode-btn').addEventListener('click', toggleMode);
         $('#set-waifu').addEventListener('change', () => {
-            applyWaifuFlag($('#set-waifu').checked);
+            applyWaifuFlag($('#set-waifu').checked, true);
             applyMode();
             saveAll();
         });
