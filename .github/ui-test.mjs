@@ -120,8 +120,21 @@ await page.click('#close-settings');
 await page.waitForTimeout(300);
 
 // ---------- 4. 普通模式对话 ----------
-const defaultModeLabel = String(await page.textContent('#mode-label') || '').trim();
-ok('默认对话模式是 waifu', defaultModeLabel === 'WA', defaultModeLabel);
+const defaults = await page.evaluate(() => {
+    try {
+        const m = JSON.parse(localStorage.getItem('aichat_meta_v3') || '{}');
+        return {
+            mode: (m.settings || {}).defaultMode || '',
+            style: (m.settings || {}).bubbleStyle || '',
+            aiAvatar: (m.aiProfile || {}).avatar || '',
+            userAvatar: (m.userProfile || {}).avatar || '',
+        };
+    } catch (e) { return {}; }
+});
+ok('默认对话模式是 waifu', defaults.mode === 'waifu', defaults.mode);
+ok('默认气泡样式是现代简约', defaults.style === 'modern', defaults.style);
+ok('默认 AI 头像已设置', String(defaults.aiAvatar).includes('t02fdce69'), String(defaults.aiAvatar).slice(0, 40));
+ok('默认用户头像已设置', String(defaults.userAvatar).includes('t021d9229'), String(defaults.userAvatar).slice(0, 40));
 // 切回 AI 模式做后续测试
 for (let i = 0; i < 3; i++) {
     const l = String(await page.textContent('#mode-label') || '').trim();
