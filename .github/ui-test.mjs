@@ -192,10 +192,8 @@ await page.evaluate(() => document.querySelector('#menu-btn').click());
 await page.waitForTimeout(500);
 await page.evaluate(() => document.querySelector('#new-chat-btn').click());
 await page.waitForTimeout(600);
-await page.evaluate(() => document.querySelector('#mode-btn').click());
-await page.waitForTimeout(300);
-const modeLabel = await page.textContent('#mode-label');
-ok('模式按钮切到 WA', modeLabel === 'WA', modeLabel);
+const modeLabel = String(await page.textContent('#mode-label') || '').trim();
+ok('新对话默认就是 WA 模式', modeLabel === 'WA', modeLabel);
 
 await page.evaluate(() => {
     const el = document.querySelector('#chat-input');
