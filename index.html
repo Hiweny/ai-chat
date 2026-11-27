@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="css/style.css?v=20261128a">
+    <link rel="stylesheet" href="css/style.css?v=20261128b">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-theme">
 </head>
 <body>
@@ -114,6 +114,7 @@
             </button>
 
             <div id="input-area" class="input-area">
+                <div id="busy-hint" class="busy-hint" hidden><span class="dot-pulse"></span><span id="busy-hint-text">正在处理…</span></div>
                 <div id="attach-preview" class="attach-preview" hidden></div>
                 <div class="input-wrapper" id="input-wrapper">
                     <textarea id="chat-input" placeholder="输入消息..." rows="1" aria-label="消息输入框"></textarea>
@@ -368,6 +369,14 @@
             <!-- 对话行为 -->
             <div class="settings-section">
                 <div class="section-title">对话行为</div>
+                <div class="ctx-meter" id="ctx-meter">
+                    <div class="ctx-meter-head">
+                        <span>当前对话上下文</span>
+                        <span id="ctx-meter-pct">--</span>
+                    </div>
+                    <div class="ctx-meter-track"><i id="ctx-meter-fill"></i></div>
+                    <div class="ctx-meter-foot" id="ctx-meter-text">上下文用量：--</div>
+                </div>
                 <div class="setting-item">
                     <label class="checkbox-label">
                         <input type="checkbox" id="set-waifu">
@@ -501,6 +510,6 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/showdown@2.1.0/dist/showdown.min.js"></script>
-    <script src="js/app.js?v=20261128a"></script>
+    <script src="js/app.js?v=20261128b"></script>
 </body>
 </html>
