@@ -538,7 +538,8 @@ await page.waitForTimeout(400);
 // 跨域 mock：浏览器会先发 OPTIONS 预检，必须带上 CORS 头，否则真实 POST 根本不会发出
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
 let visionReq = null, chatReq = '';
-await page.route('**/openrouter.ai/**', async route => {
+await page.route('**/*', async route => {
+    if (!/openrouter\.ai/.test(route.request().url())) return route.fallback();
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     try { visionReq = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
     await new Promise(r => setTimeout(r, 900));   // 故意慢一点，验证"先上屏再识图"
@@ -547,7 +548,8 @@ await page.route('**/openrouter.ai/**', async route => {
         body: JSON.stringify({ choices: [{ message: { content: '画面中央是一个红色圆形，背景是浅蓝色，左上角写着 HELLO 2026。' } }] }),
     });
 });
-await page.route('**/free-api.cnmwx.com/**', async route => {
+await page.route('**/*', async route => {
+    if (!/cnmwx/.test(route.request().url())) return route.fallback();
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     chatReq = route.request().postData() || '';
     route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'text/plain; charset=utf-8' }, body: '我看到图里有个红色圆形啦。' });
@@ -603,6 +605,10 @@ ok('输入框上方显示"正在识图"', midState.hintShown && /识图/.test(mi
 await page.screenshot({ path: path.join(OUT, '17-vision-busy.jpg'), type: 'jpeg', quality: 72 });
 
 await page.waitForTimeout(3200);
+if (!visionReq) {
+    const toasts = await page.evaluate(() => [...document.querySelectorAll('.toast')].map(t => t.textContent));
+    console.log('   [diag] 识图未发出请求，页面提示：', JSON.stringify(toasts));
+}
 ok('识图请求带上了图片数据', !!(visionReq && visionReq.messages && Array.isArray(visionReq.messages[0].content)
     && visionReq.messages[0].content.some(c => c.type === 'image_url' && /^data:image\//.test(c.image_url && c.image_url.url))));
 ok('识图请求 max_tokens 足够（推理模型）', !!(visionReq && visionReq.max_tokens >= 1200), String(visionReq && visionReq.max_tokens));
@@ -612,7 +618,8 @@ ok('识图结束后状态条收起', await page.evaluate(() => document.getEleme
 
 // ---------- 6.8 OpenAI 兼容接口：走原生 function calling ----------
 const nativeReqs = [];
-await page.route('**/api.test.local/**', async route => {
+await page.route('**/*', async route => {
+    if (!/api\.test\.local/.test(route.request().url())) return route.fallback();
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     let body = {};
     try { body = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
@@ -633,7 +640,8 @@ await page.route('**/api.test.local/**', async route => {
     });
 });
 let tavilyHits = 0;
-await page.route('**/api.tavily.com/**', async route => {
+await page.route('**/*', async route => {
+    if (!/tavily/.test(route.request().url())) return route.fallback();
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
     tavilyHits++;
     await route.fulfill({
