@@ -540,11 +540,12 @@ await page.waitForTimeout(400);
 // ---------- 6.6 识图端到端（mock 识图 + 聊天接口，验证真实链路） ----------
 // 跨域 mock：浏览器会先发 OPTIONS 预检，必须带上 CORS 头，否则真实 POST 根本不会发出
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS' };
-let visionReq = null, chatReq = '';
+const visionReqs = [];
+let chatReq = '';
 await page.route('**/*', async route => {
     if (!/openrouter\.ai/.test(route.request().url())) return route.fallback();
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: CORS });
-    try { visionReq = JSON.parse(route.request().postData() || '{}'); } catch (e) {}
+    try { visionReqs.push(JSON.parse(route.request().postData() || '{}')); } catch (e) {}
     await new Promise(r => setTimeout(r, 900));   // 故意慢一点，验证"先上屏再识图"
     route.fulfill({
         status: 200, headers: { ...CORS, 'content-type': 'application/json' },
@@ -583,12 +584,17 @@ await page.waitForTimeout(400);
 
 // 选一张图
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAJUlEQVR42mNkYPhfz0AEYBxVSF+FjIOuMEYXsjCqkL4KAQAA//8DAAoAAf8E3ZcAAAAASUVORK5CYII=', 'base64');
+const PNG2 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAJElEQVR42mNkYPjfwEAcYBxVSF+FjIOuMEYXsjCqkL4KAQAA//8DAAoAAf8E3ZcAAAAASUVORK5CYII=', 'base64');
 const fcP = page.waitForEvent('filechooser');
 await page.click('#attach-btn');
 const fc = await fcP;
-await fc.setFiles({ name: 'pic.png', mimeType: 'image/png', buffer: PNG });
-await page.waitForTimeout(800);
-ok('选图后出现缩略图预览', await page.evaluate(() => document.querySelectorAll('#attach-preview .attach-item').length > 0));
+await fc.setFiles([
+    { name: 'pic1.png', mimeType: 'image/png', buffer: PNG },
+    { name: 'pic2.png', mimeType: 'image/png', buffer: PNG2 },
+]);
+await page.waitForTimeout(1200);
+const attachCount = await page.evaluate(() => document.querySelectorAll('#attach-preview .attach-item').length);
+ok('多图：选两张后出现两个缩略图', attachCount === 2, String(attachCount));
 await page.screenshot({ path: path.join(OUT, '16-attach-preview.jpg'), type: 'jpeg', quality: 72, clip: { x: 0, y: 560, width: 390, height: 284 } });
 
 // 发送：先上屏，再识图
@@ -607,17 +613,21 @@ ok('识图未完成时消息已先上屏', midState.userRows > 0, String(midStat
 ok('输入框上方显示"正在识图"', midState.hintShown && /识图/.test(midState.hintText), JSON.stringify(midState));
 await page.screenshot({ path: path.join(OUT, '17-vision-busy.jpg'), type: 'jpeg', quality: 72 });
 
-await page.waitForTimeout(3200);
-if (!visionReq) {
+await page.waitForTimeout(7000);
+if (!visionReqs.length) {
     const toasts = await page.evaluate(() => [...document.querySelectorAll('.toast')].map(t => t.textContent));
     console.log('   [diag] 识图未发出请求，页面提示：', JSON.stringify(toasts));
 }
-ok('识图请求带上了图片数据', !!(visionReq && visionReq.messages && Array.isArray(visionReq.messages[0].content)
-    && visionReq.messages[0].content.some(c => c.type === 'image_url' && /^data:image\//.test(c.image_url && c.image_url.url))));
-ok('识图请求 max_tokens 足够（推理模型）', !!(visionReq && visionReq.max_tokens >= 1200), String(visionReq && visionReq.max_tokens));
-ok('识图请求带了提示词', !!(visionReq && visionReq.messages[0].content.some(c => c.type === 'text' && c.text && c.text.length > 10)));
+const v0 = visionReqs[0];
+ok('多图：每张图各发一次识图请求', visionReqs.length === 2, String(visionReqs.length));
+ok('识图请求带上了图片数据', !!(v0 && v0.messages && Array.isArray(v0.messages[0].content)
+    && v0.messages[0].content.some(c => c.type === 'image_url' && /^data:image\//.test(c.image_url && c.image_url.url))));
+ok('识图请求 max_tokens 足够（推理模型）', !!(v0 && v0.max_tokens >= 1200), String(v0 && v0.max_tokens));
+ok('识图请求带了提示词', !!(v0 && v0.messages[0].content.some(c => c.type === 'text' && c.text && c.text.length > 10)));
 const lastChatReq = await page.evaluate(() => window.__lastChatReq || '');
 ok('聊天请求里带上了【图片内容】描述', /【图片内容】/.test(lastChatReq) && /红色圆形/.test(lastChatReq), lastChatReq.slice(0, 200));
+ok('多图：prompt 标明图片张数并逐张编号', /一共发了 2 张/.test(lastChatReq) && /第 1 张/.test(lastChatReq) && /第 2 张/.test(lastChatReq), lastChatReq.slice(0, 260));
+ok('带图这一轮不提供生图能力', !/genimg/.test(lastChatReq), lastChatReq.slice(0, 200));
 ok('识图结束后状态条收起', await page.evaluate(() => document.getElementById('busy-hint').hidden));
 
 // ---------- 6.8 OpenAI 兼容接口：走原生 function calling ----------
