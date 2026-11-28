@@ -278,6 +278,7 @@ ok('识图剥离思考前缀', T.stripThinkingText('思考过程：先看主体�
 const pStruct = T.buildPrompt('你好');
 ok('prompt 有【本轮】段', pStruct.includes('【本轮】\nUser: 你好'), JSON.stringify(pStruct.slice(-80)));
 ok('prompt 不再有旧版格式说明段', !pStruct.includes('【格式说明】'));
+ok('带图本轮提示"刚刚发来"', T.buildPrompt('看图', undefined, { hasImages: true }).includes('刚刚'));
 
 console.log('\n============ 结果 ============');
 for (const [st, n, e] of R) console.log(`${st}  ${n}${e ? '  (' + e + ')' : ''}`);
