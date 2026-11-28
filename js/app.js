@@ -666,6 +666,7 @@ Example structure:
     }
 
     function buildPrompt(userMsg, extra, opts) {
+        const o = opts || {};
         const parts = [headBlocks(opts)];
         const hist = historyMsgs(userMsg);
         if (hist.length) {
@@ -673,7 +674,9 @@ Example structure:
                 + hist.map(m => (m.role === 'user' ? 'User: ' : 'Assistant: ') + msgText(m)).join('\n'));
         }
         if (userMsg) {
-            const turn = [`User: ${userMsg}`];
+            const turn = [];
+            if (o.hasImages) turn.push('（下面这条是对方【刚刚】发来的图片描述，请优先针对它回应；历史里更早的图片描述与它无关，不要混用）');
+            turn.push(`User: ${userMsg}`);
             if (extra) turn.push(extra);
             turn.push('Assistant:');
             parts.push('【本轮】\n' + turn.join('\n'));
@@ -1045,6 +1048,8 @@ Example structure:
     // ========== 识图 ==========
     const pendingImages = [];   // 待发送的图片（dataURL）
     let visionBusy = false;
+    // 发送锁：从「上屏」到「识图 + 回复」全程占住，避免两轮识图交叉导致图片串台
+    let sendBusy = false;
 
     // 输入框上方的处理状态（识图 / 联网检索）
     function setBusyHint(text) {
@@ -1461,7 +1466,7 @@ Example structure:
         if (isGenerating) return;
         const tailMsg = getMessages().slice(-1)[0];
         const regenOpts = (tailMsg && tailMsg.role === 'user' && Array.isArray(tailMsg.images) && tailMsg.images.length)
-            ? { noImage: true } : undefined;
+            ? { noImage: true, hasImages: true } : undefined;
         const noImage = !!(regenOpts && regenOpts.noImage);
 
         const prompt = fitPrompt(buildPrompt(userMsg, undefined, regenOpts));
@@ -1636,6 +1641,11 @@ Example structure:
 
     // ========== 发送消息 ==========
     async function sendMessage(overrideText) {
+        // 串行保护：识图/回复没结束前不允许再发，否则两轮图片会交叉、张冠李戴
+        if (sendBusy) {
+            showToast('上一条还在识图/回复，等它完成再发，免得图片串台', 'info', 2200);
+            return;
+        }
         const typed = (overrideText || chatInput.value).trim();
         const hasImgs = pendingImages.length > 0;
         if (!typed && !hasImgs) return;
@@ -1645,6 +1655,10 @@ Example structure:
             return;
         }
 
+        sendBusy = true;
+        updateInputState();
+        const sendConvId = activeConvId;
+        try {
         const shots = hasImgs ? pendingImages.slice() : [];
         const userMsg = typed || (hasImgs ? '[图片]' : '');
         if (!userMsg) return;
@@ -1729,6 +1743,13 @@ Example structure:
             }
         }
 
+        // 识图期间用户切了对话：结果已经写回原对话，这里不再往当前对话里发请求
+        if (activeConvId !== sendConvId) {
+            saveAll();
+            showToast('图片已识别并保存在原对话里', 'info', 2600);
+            return;
+        }
+
         // Waifu 模式：消息先进缓冲，等用户停手再统一回复
         if (isWaifuMode()) {
             if (isGenerating && abortController) {
@@ -1739,7 +1760,11 @@ Example structure:
             return;
         }
 
-        await runNormalTurn(sendText, { noImage: shots.length > 0 });
+        await runNormalTurn(sendText, { noImage: shots.length > 0, hasImages: shots.length > 0 });
+        } finally {
+            sendBusy = false;
+            updateInputState();
+        }
     }
 
     // ---------- 普通模式：一问一答，流式 ----------
@@ -2116,7 +2141,7 @@ Example structure:
         let fullText = '';
         try {
             const wNoImage = Array.isArray(last.images) && last.images.length > 0;
-            const wOpts = wNoImage ? { noImage: true } : undefined;
+            const wOpts = wNoImage ? { noImage: true, hasImages: true } : undefined;
             const wPrompt = fitPrompt(buildPrompt(last.content, undefined, wOpts));
             const wMessages = buildMessages(last.content, undefined, wOpts);
             const wNative = settings.searchEnabled && currentProvider().type === 'openai';
@@ -2243,6 +2268,7 @@ Example structure:
     }
 
     function updateSendButtonState() {
+        if (sendBusy) { sendBtn.disabled = true; return; }
         if (typeof visionBusy !== 'undefined' && visionBusy) { sendBtn.disabled = true; return; }
         const hasContent = chatInput.value.trim().length > 0 || (typeof pendingImages !== 'undefined' && pendingImages.length > 0);
         sendBtn.disabled = !hasContent || (isGenerating && !isWaifuMode());
