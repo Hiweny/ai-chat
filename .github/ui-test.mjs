@@ -611,6 +611,15 @@ const midState = await page.evaluate(() => {
 });
 ok('识图未完成时消息已先上屏', midState.userRows > 0, String(midState.userRows));
 ok('输入框上方显示"正在识图"', midState.hintShown && /识图/.test(midState.hintText), JSON.stringify(midState));
+
+// 识图还没结束就再点发送：必须被拦下，且输入内容不丢
+await page.fill('#chat-input', '再问一句');
+await page.click('#send-btn');
+await page.waitForTimeout(250);
+const blockedToast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map(t => t.textContent).join('|'));
+ok('识图中再次发送被拦下', /等它完成|串台/.test(blockedToast), blockedToast.slice(0, 120));
+ok('被拦下时输入内容不丢', await page.evaluate(() => document.getElementById('chat-input').value.trim() === '再问一句'));
+await page.fill('#chat-input', '');
 await page.screenshot({ path: path.join(OUT, '17-vision-busy.jpg'), type: 'jpeg', quality: 72 });
 
 await page.waitForTimeout(7000);
