@@ -1657,7 +1657,6 @@ Example structure:
 
         sendBusy = true;
         updateInputState();
-        const sendConvId = activeConvId;
         try {
         const shots = hasImgs ? pendingImages.slice() : [];
         const userMsg = typed || (hasImgs ? '[图片]' : '');
@@ -1672,6 +1671,7 @@ Example structure:
         if (!activeConvId || !conversations[activeConvId]) {
             createConversation(userMsg.slice(0, 30));
         }
+        const sendConvId = activeConvId;   // 记在新建对话之后，否则会被误判为切走了
         chatInput.value = '';
         autoResizeInput();
         updateCharCount();
