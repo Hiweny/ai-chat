@@ -612,9 +612,11 @@ const midState = await page.evaluate(() => {
 ok('识图未完成时消息已先上屏', midState.userRows > 0, String(midState.userRows));
 ok('输入框上方显示"正在识图"', midState.hintShown && /识图/.test(midState.hintText), JSON.stringify(midState));
 
-// 识图还没结束就再点发送：必须被拦下，且输入内容不丢
+// 识图还没结束就再发（用回车触发，绕过按钮 disabled 的等待）：必须被拦下，且输入内容不丢
 await page.fill('#chat-input', '再问一句');
-await page.click('#send-btn');
+const lockDisabled = await page.evaluate(() => document.getElementById('send-btn').disabled);
+ok('识图期间发送按钮禁用（串行锁）', lockDisabled === true);
+await page.locator('#chat-input').press('Enter');
 await page.waitForTimeout(250);
 const blockedToast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map(t => t.textContent).join('|'));
 ok('识图中再次发送被拦下', /等它完成|串台/.test(blockedToast), blockedToast.slice(0, 120));
